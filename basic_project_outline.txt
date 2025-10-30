@@ -1,0 +1,20 @@
+intended use case:
+
+kitchen staff (admin role "KITCHEN_STAFF") can list the items, can set is live or not, can add addons item for each menu item, delete the items (soft delete in db), edit or modify the existing items, send the item for delivery, accept the order, cancle the order.
+
+customer can view the menu, it will have only two meal type, lunch and dinner, can order item directly, or can purchase the subscription plan.
+
+the plans are, 7 days, 14 days, 30 days, and 60 days, each plan contains double the vouchers, 1 for each meal, example 1 for lunch and 1 for dinner.
+
+customer can use these voucher to place the order.
+customer cannot place or cancle the lunch order after 11 am and dinner order after 7 pm.
+customer can set auto order if the customer has any remainin vouchers
+
+
+the vouchers can be used to order any meal (dinner or lunch), it will have 3 months expiry from the issued date (date of purchase of subscription plan)
+vouchers cannot be purchased individually.
+
+in future we might implement such plans like, only lunch or only dinner or included both. initially we will have included both.
+
+in case of only lunch or only dinner, the voucher issued within only lunch cannot be used for dinner and vouchers issued within only dinner plan cannot be used for lunch.
+
