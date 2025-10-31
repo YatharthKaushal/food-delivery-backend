@@ -33,10 +33,10 @@ const subscriptionSchema = new Schema(
       type: Date,
       required: [true, "Expiry date is required"],
       validate: {
-        validator: function(value) {
+        validator: function (value) {
           return value > this.purchaseDate;
         },
-        message: "Expiry date must be after purchase date"
+        message: "Expiry date must be after purchase date",
       },
     },
     totalVouchers: {
@@ -86,7 +86,7 @@ const subscriptionSchema = new Schema(
       required: [true, "Subscription status is required"],
       enum: {
         values: ["ACTIVE", "EXPIRED", "CANCELLED", "EXHAUSTED"],
-        message: "{VALUE} is not a valid subscription status"
+        message: "{VALUE} is not a valid subscription status",
       },
       default: "ACTIVE",
       uppercase: true,
@@ -103,7 +103,6 @@ const subscriptionSchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
       transform: function (_doc, ret) {
         delete ret.__v;

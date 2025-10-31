@@ -1,4 +1,6 @@
-// Import the cloudinary library
+import dotenv from "dotenv";
+dotenv.config();
+
 import { v2 as cloudinary } from "cloudinary";
 
 // Environment variables
@@ -39,7 +41,7 @@ try {
   console.log(`> Cloud Name: ${CLOUDINARY_CLOUD_NAME}`);
 } catch (error) {
   console.error("> Cloudinary configuration failed:", error.message);
-  process.exit(1);
+  console.warn("> Server will continue but Cloudinary features will not work");
 }
 
 // Export cloudinary for use in other modules

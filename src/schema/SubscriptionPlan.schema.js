@@ -23,7 +23,8 @@ const subscriptionPlanSchema = new Schema(
       required: [true, "Plan type is required"],
       enum: {
         values: ["BOTH", "LUNCH_ONLY", "DINNER_ONLY"],
-        message: "{VALUE} is not a valid plan type. Must be BOTH, LUNCH_ONLY, or DINNER_ONLY"
+        message:
+          "{VALUE} is not a valid plan type. Must be BOTH, LUNCH_ONLY, or DINNER_ONLY",
       },
       default: "BOTH",
       uppercase: true,
@@ -76,7 +77,6 @@ const subscriptionPlanSchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
       transform: function (_doc, ret) {
         delete ret.__v;

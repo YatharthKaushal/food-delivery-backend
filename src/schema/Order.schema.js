@@ -109,7 +109,7 @@ const orderSchema = new Schema(
       required: [true, "Meal type is required"],
       enum: {
         values: ["LUNCH", "DINNER"],
-        message: "{VALUE} is not a valid meal type"
+        message: "{VALUE} is not a valid meal type",
       },
       uppercase: true,
     },
@@ -117,12 +117,12 @@ const orderSchema = new Schema(
       type: Date,
       required: [true, "Scheduled date is required"],
       validate: {
-        validator: function(value) {
+        validator: function (value) {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           return value >= today;
         },
-        message: "Scheduled date cannot be in the past"
+        message: "Scheduled date cannot be in the past",
       },
     },
     isAutoOrder: {
@@ -186,7 +186,6 @@ const orderSchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
       transform: function (_doc, ret) {
         delete ret.__v;

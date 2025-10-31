@@ -32,10 +32,10 @@ const addonSchema = new Schema(
       required: [true, "Price is required"],
       min: [0, "Price cannot be negative"],
       validate: {
-        validator: function(value) {
+        validator: function (value) {
           return Number.isFinite(value) && value >= 0;
         },
-        message: 'Price must be a valid non-negative number'
+        message: "Price must be a valid non-negative number",
       },
       set: (value) => Math.round(value * 100) / 100,
     },
@@ -95,7 +95,6 @@ const addonSchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
       transform: function (_doc, ret) {
         delete ret.__v;

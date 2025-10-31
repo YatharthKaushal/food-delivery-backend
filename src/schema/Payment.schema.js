@@ -30,8 +30,17 @@ const paymentSchema = new mongoose.Schema(
     method: {
       type: String,
       enum: {
-        values: ['CARD', 'NETBANKING', 'UPI', 'WALLET', 'EMI', 'PAYLATER', 'COD', 'OTHER'],
-        message: '{VALUE} is not a supported payment method',
+        values: [
+          "CARD",
+          "NETBANKING",
+          "UPI",
+          "WALLET",
+          "EMI",
+          "PAYLATER",
+          "COD",
+          "OTHER",
+        ],
+        message: "{VALUE} is not a supported payment method",
       },
       trim: true,
     },
@@ -85,11 +94,11 @@ const paymentSchema = new mongoose.Schema(
     amountInPaisa: {
       type: Number,
       validate: {
-        validator: function(value) {
+        validator: function (value) {
           if (!value) return true;
           return Number.isInteger(value) && value >= 0;
         },
-        message: "Amount in paisa must be a valid integer"
+        message: "Amount in paisa must be a valid integer",
       },
     },
 
@@ -155,7 +164,6 @@ const paymentSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
   }
 );
 

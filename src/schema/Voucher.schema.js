@@ -23,7 +23,7 @@ const voucherSchema = new Schema(
       type: String,
       enum: {
         values: ["BOTH", "LUNCH", "DINNER"],
-        message: "{VALUE} is not a valid meal type"
+        message: "{VALUE} is not a valid meal type",
       },
       default: "BOTH",
       uppercase: true,
@@ -38,10 +38,10 @@ const voucherSchema = new Schema(
       type: Date,
       required: [true, "Expiry date is required"],
       validate: {
-        validator: function(value) {
+        validator: function (value) {
           return value > this.issuedDate;
         },
-        message: "Expiry date must be after issued date"
+        message: "Expiry date must be after issued date",
       },
       immutable: true,
     },
@@ -76,7 +76,6 @@ const voucherSchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
       transform: function (_doc, ret) {
         delete ret.__v;

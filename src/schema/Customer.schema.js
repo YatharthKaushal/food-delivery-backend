@@ -22,14 +22,12 @@ const customerSchema = new mongoose.Schema(
       trim: true,
       match: [/^[0-9]{10}$/, "Please provide a valid 10-digit phone number"],
     },
-    authMethod: {
+    firebaseUid: {
       type: String,
-      required: [true, 'Authentication method is required'],
-      enum: {
-        values: ['EMAIL', 'PHONE'],
-        message: '{VALUE} is not a valid authentication method'
-      },
-      uppercase: true,
+      unique: true,
+      sparse: true, // Allows multiple null values
+      trim: true,
+      index: true,
     },
     address: {
       addressLine: {
@@ -99,25 +97,12 @@ const customerSchema = new mongoose.Schema(
       },
     },
     autoOrder: {
-      isEnabled: {
-        type: Boolean,
-        default: false,
-      },
-      preferences: {
-        lunchEnabled: {
-          type: Boolean,
-          default: false,
-        },
-        dinnerEnabled: {
-          type: Boolean,
-          default: false,
-        },
-        skipDays: {
-          type: [String],
-          enum: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
-          default: [],
-        },
-      },
+      type: Boolean,
+      default: false,
+    },
+    isProfileComplete: {
+      type: Boolean,
+      default: false,
     },
     isDeleted: {
       type: Boolean,
@@ -132,19 +117,18 @@ const customerSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
-      transform: function(_doc, ret) {
+      transform: function (_doc, ret) {
         delete ret.__v;
         return ret;
-      }
+      },
     },
     toObject: {
-      transform: function(_doc, ret) {
+      transform: function (_doc, ret) {
         delete ret.__v;
         return ret;
-      }
-    }
+      },
+    },
   }
 );
 
@@ -155,7 +139,7 @@ customerSchema.index({ isDeleted: 1 });
 
 // Compound indexes for common queries
 customerSchema.index({ isDeleted: 1, createdAt: -1 });
-customerSchema.index({ 'activeSubscription.status': 1, isDeleted: 1 });
+customerSchema.index({ "activeSubscription.status": 1, isDeleted: 1 });
 
 const Customer = mongoose.model("Customer", customerSchema);
 

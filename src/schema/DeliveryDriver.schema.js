@@ -8,13 +8,6 @@ const deliveryDriverSchema = new mongoose.Schema(
       trim: true,
       minlength: [2, "Name must be at least 2 characters long"],
       maxlength: [100, "Name cannot exceed 100 characters"],
-      validate: {
-        validator: function (v) {
-          return /^[a-zA-Z\s'-]+$/.test(v);
-        },
-        message:
-          "Name can only contain letters, spaces, apostrophes, and hyphens",
-      },
     },
 
     phone: {
@@ -23,12 +16,14 @@ const deliveryDriverSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
       trim: true,
-      validate: {
-        validator: function (v) {
-          return /^(\+91|91)?[6-9]\d{9}$/.test(v.replace(/[\s-]/g, ""));
-        },
-        message: "Please provide a valid Indian phone number",
-      },
+    },
+
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      index: true,
     },
 
     govId: {
@@ -62,7 +57,7 @@ const deliveryDriverSchema = new mongoose.Schema(
       required: [true, "Availability status is required"],
       enum: {
         values: ["AVAILABLE", "BUSY", "OFFLINE"],
-        message: "{VALUE} is not a valid availability status"
+        message: "{VALUE} is not a valid availability status",
       },
       default: "OFFLINE",
       uppercase: true,
@@ -88,7 +83,7 @@ const deliveryDriverSchema = new mongoose.Schema(
     vehicle: {
       vehicleType: {
         type: String,
-        required: [true, "Vehicle type is required"],
+        // required: [true, "Vehicle type is required"],
         enum: {
           values: ["TWO WHEELER", "FOUR WHEELER"],
           message:
@@ -99,7 +94,7 @@ const deliveryDriverSchema = new mongoose.Schema(
       },
       vehicleNumber: {
         type: String,
-        required: [true, "Vehicle number is required"],
+        // required: [true, "Vehicle number is required"],
         unique: true,
         sparse: true,
         trim: true,
@@ -108,6 +103,11 @@ const deliveryDriverSchema = new mongoose.Schema(
       documents: {
         type: [String],
       },
+    },
+
+    isProfileComplete: {
+      type: Boolean,
+      default: false,
     },
 
     isDeleted: {
@@ -123,15 +123,19 @@ const deliveryDriverSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
-    collection: "deliveryDrivers",
   }
 );
 
 // Unique field indexes (sparse)
 deliveryDriverSchema.index({ phone: 1 }, { unique: true, sparse: true });
-deliveryDriverSchema.index({ "govId.idNumber": 1 }, { unique: true, sparse: true });
-deliveryDriverSchema.index({ "vehicle.vehicleNumber": 1 }, { unique: true, sparse: true });
+deliveryDriverSchema.index(
+  { "govId.idNumber": 1 },
+  { unique: true, sparse: true }
+);
+deliveryDriverSchema.index(
+  { "vehicle.vehicleNumber": 1 },
+  { unique: true, sparse: true }
+);
 
 // Availability and performance
 deliveryDriverSchema.index({ isActive: 1, availabilityStatus: 1, rating: -1 });
@@ -139,9 +143,9 @@ deliveryDriverSchema.index({ availabilityStatus: 1, isActive: 1 });
 
 // Location-based queries
 deliveryDriverSchema.index({
-  'currentLocation.latitude': 1,
-  'currentLocation.longitude': 1,
-  availabilityStatus: 1
+  "currentLocation.latitude": 1,
+  "currentLocation.longitude": 1,
+  availabilityStatus: 1,
 });
 
 const DeliveryDriver = mongoose.model("DeliveryDriver", deliveryDriverSchema);

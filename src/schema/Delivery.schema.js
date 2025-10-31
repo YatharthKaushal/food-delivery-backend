@@ -241,7 +241,6 @@ const deliverySchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: true,
     toJSON: {
       transform: function (_doc, ret) {
         delete ret.__v;
@@ -263,21 +262,24 @@ deliverySchema.index({ customerId: 1, createdAt: -1 });
 
 // Driver queries
 deliverySchema.index({ deliveryDriverId: 1, createdAt: -1 });
-deliverySchema.index({ deliveryDriverId: 1, 'deliverySuccessStatus.status': 1 });
+deliverySchema.index({
+  deliveryDriverId: 1,
+  "deliverySuccessStatus.status": 1,
+});
 
 // Status tracking
-deliverySchema.index({ 'status.deliveredAt': -1 });
-deliverySchema.index({ 'status.failedToDeliverAt': -1 });
-deliverySchema.index({ 'status.outForDeliveryAt': 1 });
-deliverySchema.index({ 'deliverySuccessStatus.message': 1, createdAt: -1 });
+deliverySchema.index({ "status.deliveredAt": -1 });
+deliverySchema.index({ "status.failedToDeliverAt": -1 });
+deliverySchema.index({ "status.outForDeliveryAt": 1 });
+deliverySchema.index({ "deliverySuccessStatus.message": 1, createdAt: -1 });
 
 // Soft delete
 deliverySchema.index({ isDeleted: 1, deletedAt: 1 });
 
 // Geospatial queries
 deliverySchema.index({
-  'toLocation.coordinates.latitude': 1,
-  'toLocation.coordinates.longitude': 1
+  "toLocation.coordinates.latitude": 1,
+  "toLocation.coordinates.longitude": 1,
 });
 
 const Delivery = mongoose.model("Delivery", deliverySchema);
