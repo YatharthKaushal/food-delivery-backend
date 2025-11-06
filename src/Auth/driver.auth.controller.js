@@ -1,135 +1,201 @@
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 import DeliveryDriver from "../schema/DeliveryDriver.schema.js";
 import { sendSuccess, sendError } from "../utils/response.util.js";
-import { firebaseAdmin } from "../config/firebase.config.js";
 
 /**
- * Get delivery driver profile completion status
- * @route GET /api/auth/delivery-driver/status
- * @access Protected (Firebase Token Required)
+ * Register a new delivery driver
+ * @route POST /api/auth/delivery-driver/register
+ * @access Public
  */
-export const getIsProfileComplete = async (req, res) => {
+export const registerDriver = async (req, res) => {
   try {
-    // Extract Firebase user data from middleware
-    const { uid, phoneNumber } = req.firebaseUser;
+    const { name, username, password, email, phone } = req.body;
 
-    // Validate that we have either uid or phone number
-    if (!uid && !phoneNumber) {
-      return sendError(res, 400, "User identification not found in token", {
-        error: "MISSING_USER_IDENTIFICATION",
-      });
+    // Validate required fields
+    if (!name || !username || !password) {
+      return sendError(
+        res,
+        400,
+        "Name, username, and password are required fields"
+      );
     }
 
-    // Build query to find driver by firebaseUid or phone
-    const query = {
+    // Check if username already exists
+    const existingDriver = await DeliveryDriver.findOne({
+      username: username.toLowerCase(),
       isDeleted: false,
-    };
+    });
 
-    if (uid) {
-      query.firebaseUid = uid;
-    } else if (phoneNumber) {
-      query.phone = phoneNumber;
+    if (existingDriver) {
+      return sendError(
+        res,
+        409,
+        "Username already exists. Please choose a different username"
+      );
     }
 
-    // Check if driver profile exists
-    let driver = await DeliveryDriver.findOne(query);
+    // Check if email already exists (if provided)
+    if (email) {
+      const existingEmail = await DeliveryDriver.findOne({
+        email: email.toLowerCase(),
+        isDeleted: false,
+      });
 
-    // If driver doesn't exist, create a new record
-    if (!driver) {
-      try {
-        driver = await DeliveryDriver.create({
-          phone: phoneNumber || null,
-          firebaseUid: uid,
-          isProfileComplete: false,
-        });
-
-        console.log(`> New delivery driver record created for UID: ${uid}`);
-
-        return sendSuccess(
+      if (existingEmail) {
+        return sendError(
           res,
-          201,
-          "Driver profile created successfully",
-          {
-            isProfileComplete: false,
-            driverId: driver._id,
-            isNewUser: true,
-          }
+          409,
+          "Email already registered. Please use a different email"
         );
-      } catch (createError) {
-        // Handle duplicate key errors
-        if (createError.code === 11000) {
-          return sendError(
-            res,
-            409,
-            "Driver profile already exists with this phone number or Firebase UID",
-            {
-              error: "DUPLICATE_DRIVER",
-            }
-          );
-        }
-        throw createError;
       }
     }
 
-    // Return existing driver's profile completion status
-    return sendSuccess(res, 200, "Profile status retrieved successfully", {
-      isProfileComplete: driver.isProfileComplete,
-      driverId: driver._id,
-      isNewUser: false,
-      hasName: !!driver.name,
-      hasVehicleInfo: !!driver.vehicle?.vehicleType,
+    // Check if phone already exists (if provided)
+    if (phone) {
+      const existingPhone = await DeliveryDriver.findOne({
+        phone: phone,
+        isDeleted: false,
+      });
+
+      if (existingPhone) {
+        return sendError(
+          res,
+          409,
+          "Phone number already registered. Please use a different phone number"
+        );
+      }
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create new delivery driver
+    const newDriver = new DeliveryDriver({
+      name,
+      username: username.toLowerCase(),
+      password: hashedPassword,
+      email: email ? email.toLowerCase() : undefined,
+      phone,
+    });
+
+    // Save to database
+    await newDriver.save();
+
+    // Return success response (exclude password)
+    return sendSuccess(res, 201, "Delivery driver registered successfully", {
+      driver: {
+        id: newDriver._id,
+        name: newDriver.name,
+        username: newDriver.username,
+        email: newDriver.email,
+        phone: newDriver.phone,
+        createdAt: newDriver.createdAt,
+      },
     });
   } catch (error) {
-    console.error("Error in getIsProfileComplete:", error);
+    console.error("Driver registration error:", error);
+
+    // Handle mongoose validation errors
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((err) => err.message);
+      return sendError(res, 400, messages.join(", "));
+    }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return sendError(
+        res,
+        409,
+        `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`
+      );
+    }
+
     return sendError(
       res,
       500,
-      "Failed to retrieve profile status",
-      process.env.NODE_ENV === "development"
-        ? { error: error.message }
-        : undefined
+      "Failed to register delivery driver. Please try again"
     );
+  }
+};
+
+/**
+ * Login delivery driver
+ * @route POST /api/auth/delivery-driver/login
+ * @access Public
+ */
+export const loginDriver = async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    // Validate required fields
+    if (!username || !password) {
+      return sendError(res, 400, "Username and password are required");
+    }
+
+    // Find driver by username (include password field for verification)
+    const driver = await DeliveryDriver.findOne({
+      username: username.toLowerCase(),
+      isDeleted: false,
+    }).select("+password");
+
+    if (!driver) {
+      return sendError(res, 401, "Invalid username or password");
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, driver.password);
+
+    if (!isPasswordValid) {
+      return sendError(res, 401, "Invalid username or password");
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        id: driver._id,
+        username: driver.username,
+        type: "driver",
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d", // Token expires in 7 days
+      }
+    );
+
+    // Return success response with token
+    return sendSuccess(res, 200, "Login successful", {
+      token,
+      driver: {
+        id: driver._id,
+        name: driver.name,
+        username: driver.username,
+        email: driver.email,
+        phone: driver.phone,
+        availabilityStatus: driver.availabilityStatus,
+        rating: driver.rating,
+      },
+    });
+  } catch (error) {
+    console.error("Driver login error:", error);
+    return sendError(res, 500, "Failed to login. Please try again");
   }
 };
 
 /**
  * Complete delivery driver onboarding by updating profile
  * @route PUT /api/auth/delivery-driver/onboarding
- * @access Protected (Firebase Token Required)
+ * @access Protected (JWT Token Required)
  */
 export const onBoardingUser = async (req, res) => {
   try {
-    // Extract Firebase user data from middleware
-    const { uid, phoneNumber } = req.firebaseUser;
-
-    // Validate that we have user identification
-    if (!uid && !phoneNumber) {
-      return sendError(res, 400, "User identification not found in token", {
-        error: "MISSING_USER_IDENTIFICATION",
-      });
-    }
+    // Extract driver data from middleware (JWT token)
+    const { id } = req.user;
 
     // Extract and validate request body
-    const { name, govId, vehicle } = req.body;
-
-    // Validate required fields
-    if (!name || !name.trim()) {
-      return sendError(res, 400, "Name is required for onboarding", {
-        error: "MISSING_NAME",
-      });
-    }
-
-    // Validate name length
-    if (name.trim().length < 2) {
-      return sendError(res, 400, "Name must be at least 2 characters long", {
-        error: "INVALID_NAME_LENGTH",
-      });
-    }
-
-    if (name.trim().length > 100) {
-      return sendError(res, 400, "Name cannot exceed 100 characters", {
-        error: "INVALID_NAME_LENGTH",
-      });
-    }
+    const { govId, vehicle } = req.body;
 
     // Validate vehicle information
     if (!vehicle || !vehicle.vehicleType || !vehicle.vehicleNumber) {
@@ -142,7 +208,7 @@ export const onBoardingUser = async (req, res) => {
     }
 
     // Validate vehicle type enum
-    const validVehicleTypes = ["BIKE", "SCOOTER", "CAR", "VAN"];
+    const validVehicleTypes = ["TWO WHEELER", "FOUR WHEELER"];
     if (!validVehicleTypes.includes(vehicle.vehicleType.toUpperCase())) {
       return sendError(res, 400, "Invalid vehicle type", {
         error: "INVALID_VEHICLE_TYPE",
@@ -163,34 +229,18 @@ export const onBoardingUser = async (req, res) => {
       );
     }
 
-    // Build query to find driver
-    const query = {
+    // Find driver by ID
+    const driver = await DeliveryDriver.findOne({
+      _id: id,
       isDeleted: false,
-    };
-
-    if (uid) {
-      query.firebaseUid = uid;
-    } else if (phoneNumber) {
-      query.phone = phoneNumber;
-    }
-
-    // Check if driver profile exists
-    let driver = await DeliveryDriver.findOne(query);
+    });
 
     if (!driver) {
-      return sendError(
-        res,
-        404,
-        "Driver profile not found. Please check profile status first",
-        {
-          error: "DRIVER_NOT_FOUND",
-        }
-      );
+      return sendError(res, 404, "Driver profile not found");
     }
 
     // Prepare update data
     const updateData = {
-      name: name.trim(),
       vehicle: {
         vehicleType: vehicle.vehicleType.toUpperCase(),
         vehicleNumber: vehicle.vehicleNumber.toUpperCase().trim(),
@@ -211,18 +261,10 @@ export const onBoardingUser = async (req, res) => {
       }
     }
 
-    // Set isProfileComplete to true if we have name and vehicle info
-    const hasVehicleInfo =
-      vehicle?.vehicleType && vehicle?.vehicleNumber;
-
-    if (name && hasVehicleInfo) {
-      updateData.isProfileComplete = true;
-    }
-
     // Update driver profile
     try {
-      driver = await DeliveryDriver.findOneAndUpdate(
-        query,
+      const updatedDriver = await DeliveryDriver.findOneAndUpdate(
+        { _id: id, isDeleted: false },
         { $set: updateData },
         {
           new: true,
@@ -230,16 +272,15 @@ export const onBoardingUser = async (req, res) => {
         }
       );
 
-      console.log(`> Driver profile updated for UID: ${uid}`);
+      console.log(`> Driver profile updated for ID: ${id}`);
 
       return sendSuccess(res, 200, "Profile updated successfully", {
-        driverId: driver._id,
-        isProfileComplete: driver.isProfileComplete,
-        name: driver.name,
-        phone: driver.phone,
-        vehicle: driver.vehicle,
-        govId: driver.govId,
-        availabilityStatus: driver.availabilityStatus,
+        driverId: updatedDriver._id,
+        name: updatedDriver.name,
+        phone: updatedDriver.phone,
+        vehicle: updatedDriver.vehicle,
+        govId: updatedDriver.govId,
+        availabilityStatus: updatedDriver.availabilityStatus,
       });
     } catch (updateError) {
       // Handle duplicate vehicle number error
@@ -248,9 +289,11 @@ export const onBoardingUser = async (req, res) => {
         let message = "This information is already registered";
 
         if (field === "vehicle.vehicleNumber") {
-          message = "This vehicle number is already registered with another driver";
+          message =
+            "This vehicle number is already registered with another driver";
         } else if (field === "govId.idNumber") {
-          message = "This government ID is already registered with another driver";
+          message =
+            "This government ID is already registered with another driver";
         }
 
         return sendError(res, 409, message, {
@@ -277,134 +320,6 @@ export const onBoardingUser = async (req, res) => {
       res,
       500,
       "Failed to update driver profile",
-      process.env.NODE_ENV === "development"
-        ? { error: error.message }
-        : undefined
-    );
-  }
-};
-
-/**
- * Create a test delivery driver for development/testing purposes
- * @route POST /api/auth/delivery-driver/create-test
- * @access Protected (Admin Only)
- */
-export const createTestDriver = async (req, res) => {
-  try {
-    // Extract phone number from request body
-    const { phoneNumber } = req.body;
-
-    // Validate phone number
-    if (!phoneNumber) {
-      return sendError(res, 400, "Phone number is required", {
-        error: "MISSING_PHONE_NUMBER",
-      });
-    }
-
-    // Validate phone number format (10 digits)
-    const phoneRegex = /^[0-9]{10}$/;
-    if (!phoneRegex.test(phoneNumber)) {
-      return sendError(
-        res,
-        400,
-        "Please provide a valid 10-digit phone number",
-        {
-          error: "INVALID_PHONE_FORMAT",
-        }
-      );
-    }
-
-    // Generate a unique test UID based on phone number
-    const TEST_UID = `test-driver-${phoneNumber}`;
-
-    // Check if test driver already exists
-    const existingDriver = await DeliveryDriver.findOne({
-      $or: [
-        { phone: phoneNumber, isDeleted: false },
-        { firebaseUid: TEST_UID, isDeleted: false },
-      ],
-    });
-
-    if (existingDriver) {
-      return sendError(
-        res,
-        409,
-        "Test driver already exists with this phone number",
-        {
-          error: "DUPLICATE_TEST_DRIVER",
-          driverId: existingDriver._id,
-        }
-      );
-    }
-
-    // Create custom token with Firebase Admin
-    let customToken;
-    try {
-      customToken = await firebaseAdmin
-        .auth()
-        .createCustomToken(TEST_UID, { phone_number: `+91${phoneNumber}` });
-    } catch (tokenError) {
-      console.error("Error creating custom token:", tokenError);
-      return sendError(res, 500, "Failed to generate authentication token", {
-        error: "TOKEN_GENERATION_FAILED",
-        details:
-          process.env.NODE_ENV === "development"
-            ? tokenError.message
-            : undefined,
-      });
-    }
-
-    // Create driver record in database
-    let driver;
-    try {
-      driver = await DeliveryDriver.create({
-        phone: phoneNumber,
-        firebaseUid: TEST_UID,
-        isProfileComplete: false,
-        name: `Test Driver ${phoneNumber}`,
-      });
-
-      console.log(`> Test delivery driver created with UID: ${TEST_UID}`);
-
-      return sendSuccess(res, 201, "Test driver created successfully", {
-        driverId: driver._id,
-        firebaseUid: TEST_UID,
-        phoneNumber: phoneNumber,
-        customToken: customToken,
-        note: "Use this custom token to authenticate as this test user in Firebase",
-      });
-    } catch (createError) {
-      // Handle duplicate key errors
-      if (createError.code === 11000) {
-        return sendError(
-          res,
-          409,
-          "Driver record already exists with this phone number or Firebase UID",
-          {
-            error: "DUPLICATE_DRIVER",
-          }
-        );
-      }
-
-      // Handle validation errors
-      if (createError.name === "ValidationError") {
-        const validationErrors = Object.values(createError.errors).map(
-          (err) => err.message
-        );
-        return sendError(res, 400, "Validation failed", {
-          error: "VALIDATION_ERROR",
-          details: validationErrors,
-        });
-      }
-
-      throw createError;
-    }
-  } catch (error) {
-    console.error("Error in createTestDriver:", error);
-    return sendError(
-      res,
-      500,
-      "Failed to create test driver",
       process.env.NODE_ENV === "development"
         ? { error: error.message }
         : undefined

@@ -4,10 +4,17 @@ import Customer from "../schema/Customer.schema.js";
 import { sendSuccess, sendError } from "../utils/response.util.js";
 
 /**
- * Generate vouchers for a subscription
+ * DEPRECATED: Generate vouchers for a subscription
+ * @deprecated This function is no longer used. Voucher tracking is now done via the Subscription table's
+ * totalVouchers and usedVouchers fields. Individual voucher records are NOT created.
  * @access System/Internal - Called when subscription is created
  * @description Creates individual voucher records for a subscription
+ *
+ * NOTE: This function has been deprecated as part of Phase 1 refactor (IMPLEMENTATION_PLAN.md)
+ * The new approach tracks vouchers directly in the Subscription schema.
+ * See: src/Subscription/subscription.controller.js for the new voucher management logic.
  */
+/* COMMENTED OUT - NO LONGER IN USE
 export const generateVouchersForSubscription = async (req, res) => {
   try {
     const { subscriptionId } = req.body;
@@ -96,18 +103,19 @@ export const generateVouchersForSubscription = async (req, res) => {
     );
   }
 };
+*/
 
 /**
  * Get customer's own vouchers
  * @access Customer (Firebase authenticated)
- * @description Retrieve all vouchers for the authenticated customer
+ * @description Retrieve all voucher batches for the authenticated customer
  */
 export const getMyVouchers = async (req, res) => {
   try {
     const firebaseUid = req.firebaseUser?.uid;
     const {
       mealType,
-      isUsed,
+      hasRemaining,
       isExpired,
       includeDeleted = "false",
       sortBy = "issuedDate",
@@ -132,8 +140,10 @@ export const getMyVouchers = async (req, res) => {
       filter.mealType = mealType.toUpperCase();
     }
 
-    if (isUsed !== undefined) {
-      filter.isUsed = isUsed === "true";
+    if (hasRemaining === "true") {
+      filter.remainingVouchers = { $gt: 0 };
+    } else if (hasRemaining === "false") {
+      filter.remainingVouchers = 0;
     }
 
     if (isExpired !== undefined) {
@@ -148,12 +158,24 @@ export const getMyVouchers = async (req, res) => {
     const sortOptions = {};
     sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
 
-    // Fetch vouchers
+    // Fetch voucher batches
     const vouchers = await Voucher.find(filter)
       .populate("subscriptionId")
       .sort(sortOptions);
 
-    return sendSuccess(res, 200, "Vouchers retrieved successfully", vouchers);
+    // Add computed fields
+    const vouchersWithDetails = vouchers.map((v) => ({
+      ...v.toObject(),
+      usedVouchers: v.totalVouchers - v.remainingVouchers,
+      isExhausted: v.remainingVouchers === 0,
+    }));
+
+    return sendSuccess(
+      res,
+      200,
+      "Vouchers retrieved successfully",
+      vouchersWithDetails
+    );
   } catch (error) {
     console.error("Error fetching customer vouchers:", error);
     return sendError(res, 500, "Failed to fetch vouchers. Please try again");
@@ -163,7 +185,7 @@ export const getMyVouchers = async (req, res) => {
 /**
  * Get customer's available vouchers
  * @access Customer (Firebase authenticated)
- * @description Get only unused, non-expired vouchers
+ * @description Get voucher batches with remaining vouchers that are not expired
  */
 export const getMyAvailableVouchers = async (req, res) => {
   try {
@@ -181,10 +203,10 @@ export const getMyAvailableVouchers = async (req, res) => {
       return sendError(res, 404, "Customer not found");
     }
 
-    // Build filter for available vouchers
+    // Build filter for available voucher batches
     const filter = {
       customerId: customer._id,
-      isUsed: false,
+      remainingVouchers: { $gt: 0 },
       isExpired: false,
       isDeleted: false,
       expiryDate: { $gt: new Date() },
@@ -196,16 +218,22 @@ export const getMyAvailableVouchers = async (req, res) => {
       filter.$or = [{ mealType: upperMealType }, { mealType: "BOTH" }];
     }
 
-    // Fetch available vouchers
+    // Fetch available voucher batches
     const vouchers = await Voucher.find(filter)
       .populate("subscriptionId")
       .sort({ expiryDate: 1 }); // Sort by expiry date (closest first)
+
+    // Add computed fields
+    const vouchersWithDetails = vouchers.map((v) => ({
+      ...v.toObject(),
+      usedVouchers: v.totalVouchers - v.remainingVouchers,
+    }));
 
     return sendSuccess(
       res,
       200,
       "Available vouchers retrieved successfully",
-      vouchers
+      vouchersWithDetails
     );
   } catch (error) {
     console.error("Error fetching available vouchers:", error);
@@ -218,7 +246,7 @@ export const getMyAvailableVouchers = async (req, res) => {
 };
 
 /**
- * Get voucher by ID (Customer's own voucher)
+ * Get voucher batch by ID (Customer's own voucher)
  * @access Customer (Firebase authenticated)
  */
 export const getMyVoucherById = async (req, res) => {
@@ -241,17 +269,29 @@ export const getMyVoucherById = async (req, res) => {
       return sendError(res, 404, "Customer not found");
     }
 
-    // Find voucher
+    // Find voucher batch
     const voucher = await Voucher.findOne({
       _id: id,
       customerId: customer._id,
-    }).populate("subscriptionId usedForOrder");
+    }).populate("subscriptionId");
 
     if (!voucher) {
       return sendError(res, 404, "Voucher not found");
     }
 
-    return sendSuccess(res, 200, "Voucher retrieved successfully", voucher);
+    // Add computed fields
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers: voucher.totalVouchers - voucher.remainingVouchers,
+      isExhausted: voucher.remainingVouchers === 0,
+    };
+
+    return sendSuccess(
+      res,
+      200,
+      "Voucher retrieved successfully",
+      voucherDetails
+    );
   } catch (error) {
     console.error("Error fetching voucher:", error);
 
@@ -264,17 +304,23 @@ export const getMyVoucherById = async (req, res) => {
 };
 
 /**
- * Use/Redeem a voucher
+ * Use/Redeem vouchers from a voucher batch
  * @access Customer (Firebase authenticated) or System
- * @description Marks a voucher as used and associates it with an order
+ * @description Decrements remainingVouchers count when vouchers are used
+ * @param {string} voucherId - The voucher batch ID
+ * @param {number} voucherCount - Number of vouchers to consume (default: 1)
  */
 export const useVoucher = async (req, res) => {
   try {
-    const { voucherId, orderId } = req.body;
+    const { voucherId, voucherCount = 1 } = req.body;
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!voucherId) {
       return sendError(res, 400, "Voucher ID is required");
+    }
+
+    if (!Number.isInteger(voucherCount) || voucherCount < 1) {
+      return sendError(res, 400, "Voucher count must be a positive integer");
     }
 
     if (!firebaseUid) {
@@ -288,7 +334,7 @@ export const useVoucher = async (req, res) => {
       return sendError(res, 404, "Customer not found");
     }
 
-    // Find voucher
+    // Find voucher batch
     const voucher = await Voucher.findOne({
       _id: voucherId,
       customerId: customer._id,
@@ -299,14 +345,6 @@ export const useVoucher = async (req, res) => {
       return sendError(res, 404, "Voucher not found");
     }
 
-    // Check if already used
-    if (voucher.isUsed) {
-      return sendError(res, 400, "Voucher has already been used", {
-        usedDate: voucher.usedDate,
-        usedForOrder: voucher.usedForOrder,
-      });
-    }
-
     // Check if expired
     if (voucher.isExpired || new Date() > voucher.expiryDate) {
       voucher.isExpired = true;
@@ -314,18 +352,33 @@ export const useVoucher = async (req, res) => {
       return sendError(res, 400, "Voucher has expired");
     }
 
-    // Mark voucher as used
-    voucher.isUsed = true;
-    voucher.usedDate = new Date();
-
-    if (orderId) {
-      voucher.usedForOrder = orderId;
+    // Check if enough vouchers are available
+    if (voucher.remainingVouchers < voucherCount) {
+      return sendError(res, 400, "Not enough vouchers remaining", {
+        remainingVouchers: voucher.remainingVouchers,
+        requested: voucherCount,
+      });
     }
 
-    await voucher.save();
-    await voucher.populate("subscriptionId usedForOrder");
+    // Decrement voucher count
+    voucher.remainingVouchers -= voucherCount;
 
-    return sendSuccess(res, 200, "Voucher redeemed successfully", voucher);
+    await voucher.save();
+    await voucher.populate("subscriptionId");
+
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers: voucher.totalVouchers - voucher.remainingVouchers,
+      vouchersConsumedNow: voucherCount,
+      isExhausted: voucher.remainingVouchers === 0,
+    };
+
+    return sendSuccess(
+      res,
+      200,
+      `${voucherCount} voucher(s) redeemed successfully`,
+      voucherDetails
+    );
   } catch (error) {
     console.error("Error using voucher:", error);
 
@@ -345,7 +398,7 @@ export const useVoucher = async (req, res) => {
 /**
  * Get voucher count summary
  * @access Customer (Firebase authenticated)
- * @description Get counts of vouchers by status
+ * @description Get aggregate counts of vouchers by status
  */
 export const getMyVoucherSummary = async (req, res) => {
   try {
@@ -362,52 +415,52 @@ export const getMyVoucherSummary = async (req, res) => {
       return sendError(res, 404, "Customer not found");
     }
 
-    // Get voucher counts
-    const [
-      totalVouchers,
-      availableVouchers,
-      usedVouchers,
-      expiredVouchers,
-      vouchersByMealType,
-    ] = await Promise.all([
-      Voucher.countDocuments({
-        customerId: customer._id,
-        isDeleted: false,
-      }),
-      Voucher.countDocuments({
-        customerId: customer._id,
-        isUsed: false,
-        isExpired: false,
-        isDeleted: false,
-        expiryDate: { $gt: new Date() },
-      }),
-      Voucher.countDocuments({
-        customerId: customer._id,
-        isUsed: true,
-        isDeleted: false,
-      }),
-      Voucher.countDocuments({
-        customerId: customer._id,
-        isExpired: true,
-        isDeleted: false,
-      }),
-      Voucher.aggregate([
-        {
-          $match: {
-            customerId: customer._id,
-            isDeleted: false,
-            isUsed: false,
-            isExpired: false,
-            expiryDate: { $gt: new Date() },
-          },
+    // Get voucher batch counts
+    const totalBatches = await Voucher.countDocuments({
+      customerId: customer._id,
+      isDeleted: false,
+    });
+
+    const expiredBatches = await Voucher.countDocuments({
+      customerId: customer._id,
+      isExpired: true,
+      isDeleted: false,
+    });
+
+    // Aggregate total voucher counts
+    const voucherTotals = await Voucher.aggregate([
+      {
+        $match: {
+          customerId: customer._id,
+          isDeleted: false,
         },
-        {
-          $group: {
-            _id: "$mealType",
-            count: { $sum: 1 },
-          },
+      },
+      {
+        $group: {
+          _id: null,
+          totalVouchers: { $sum: "$totalVouchers" },
+          remainingVouchers: { $sum: "$remainingVouchers" },
         },
-      ]),
+      },
+    ]);
+
+    // Aggregate available vouchers by meal type
+    const vouchersByMealType = await Voucher.aggregate([
+      {
+        $match: {
+          customerId: customer._id,
+          isDeleted: false,
+          isExpired: false,
+          remainingVouchers: { $gt: 0 },
+          expiryDate: { $gt: new Date() },
+        },
+      },
+      {
+        $group: {
+          _id: "$mealType",
+          count: { $sum: "$remainingVouchers" },
+        },
+      },
     ]);
 
     // Format meal type counts
@@ -421,11 +474,18 @@ export const getMyVoucherSummary = async (req, res) => {
       mealTypeCounts[item._id] = item.count;
     });
 
+    const totals = voucherTotals[0] || {
+      totalVouchers: 0,
+      remainingVouchers: 0,
+    };
+    const usedVouchers = totals.totalVouchers - totals.remainingVouchers;
+
     return sendSuccess(res, 200, "Voucher summary retrieved successfully", {
-      totalVouchers,
-      availableVouchers,
+      totalBatches,
+      expiredBatches,
+      totalVouchersIssued: totals.totalVouchers,
+      availableVouchers: totals.remainingVouchers,
       usedVouchers,
-      expiredVouchers,
       availableByMealType: mealTypeCounts,
     });
   } catch (error) {
@@ -441,7 +501,7 @@ export const getMyVoucherSummary = async (req, res) => {
 /**
  * Get all vouchers (Admin)
  * @access Admin only
- * @description Get all vouchers with filtering and pagination
+ * @description Get all voucher batches with filtering and pagination
  */
 export const getAllVouchers = async (req, res) => {
   try {
@@ -449,7 +509,7 @@ export const getAllVouchers = async (req, res) => {
       customerId,
       subscriptionId,
       mealType,
-      isUsed,
+      hasRemaining,
       isExpired,
       includeDeleted = "false",
       sortBy = "issuedDate",
@@ -473,8 +533,10 @@ export const getAllVouchers = async (req, res) => {
       filter.mealType = mealType.toUpperCase();
     }
 
-    if (isUsed !== undefined) {
-      filter.isUsed = isUsed === "true";
+    if (hasRemaining === "true") {
+      filter.remainingVouchers = { $gt: 0 };
+    } else if (hasRemaining === "false") {
+      filter.remainingVouchers = 0;
     }
 
     if (isExpired !== undefined) {
@@ -497,15 +559,22 @@ export const getAllVouchers = async (req, res) => {
     // Execute query
     const [vouchers, totalCount] = await Promise.all([
       Voucher.find(filter)
-        .populate("subscriptionId customerId usedForOrder")
+        .populate("subscriptionId customerId")
         .sort(sortOptions)
         .skip(skip)
         .limit(limitNum),
       Voucher.countDocuments(filter),
     ]);
 
+    // Add computed fields
+    const vouchersWithDetails = vouchers.map((v) => ({
+      ...v.toObject(),
+      usedVouchers: v.totalVouchers - v.remainingVouchers,
+      isExhausted: v.remainingVouchers === 0,
+    }));
+
     return sendSuccess(res, 200, "Vouchers retrieved successfully", {
-      vouchers,
+      vouchers: vouchersWithDetails,
       pagination: {
         currentPage: pageNum,
         totalPages: Math.ceil(totalCount / limitNum),
@@ -520,7 +589,7 @@ export const getAllVouchers = async (req, res) => {
 };
 
 /**
- * Get voucher by ID (Admin)
+ * Get voucher batch by ID (Admin)
  * @access Admin only
  */
 export const getVoucherById = async (req, res) => {
@@ -532,14 +601,26 @@ export const getVoucherById = async (req, res) => {
     }
 
     const voucher = await Voucher.findById(id).populate(
-      "subscriptionId customerId usedForOrder"
+      "subscriptionId customerId"
     );
 
     if (!voucher) {
       return sendError(res, 404, "Voucher not found");
     }
 
-    return sendSuccess(res, 200, "Voucher retrieved successfully", voucher);
+    // Add computed fields
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers: voucher.totalVouchers - voucher.remainingVouchers,
+      isExhausted: voucher.remainingVouchers === 0,
+    };
+
+    return sendSuccess(
+      res,
+      200,
+      "Voucher retrieved successfully",
+      voucherDetails
+    );
   } catch (error) {
     console.error("Error fetching voucher:", error);
 
@@ -552,14 +633,14 @@ export const getVoucherById = async (req, res) => {
 };
 
 /**
- * Update voucher status (Admin)
+ * Update voucher batch (Admin)
  * @access Admin only
- * @description Allows admin to manually update voucher status (for corrections)
+ * @description Allows admin to manually update voucher batch (for corrections)
  */
 export const updateVoucherStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { isUsed, isExpired, usedForOrder } = req.body;
+    const { remainingVouchers, isExpired } = req.body;
 
     if (!id) {
       return sendError(res, 400, "Voucher ID is required");
@@ -572,37 +653,47 @@ export const updateVoucherStatus = async (req, res) => {
     }
 
     // Update fields if provided
-    if (isUsed !== undefined) {
-      voucher.isUsed = isUsed;
-
-      if (isUsed && !voucher.usedDate) {
-        voucher.usedDate = new Date();
-      } else if (!isUsed) {
-        // Reset if unmarking as used
-        voucher.usedDate = null;
-        voucher.usedForOrder = null;
+    if (remainingVouchers !== undefined) {
+      if (!Number.isInteger(remainingVouchers) || remainingVouchers < 0) {
+        return sendError(
+          res,
+          400,
+          "Remaining vouchers must be a non-negative integer"
+        );
       }
+
+      if (remainingVouchers > voucher.totalVouchers) {
+        return sendError(
+          res,
+          400,
+          "Remaining vouchers cannot exceed total vouchers"
+        );
+      }
+
+      voucher.remainingVouchers = remainingVouchers;
     }
 
     if (isExpired !== undefined) {
       voucher.isExpired = isExpired;
     }
 
-    if (usedForOrder !== undefined) {
-      voucher.usedForOrder = usedForOrder;
-    }
-
     await voucher.save();
-    await voucher.populate("subscriptionId customerId usedForOrder");
+    await voucher.populate("subscriptionId customerId");
+
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers: voucher.totalVouchers - voucher.remainingVouchers,
+      isExhausted: voucher.remainingVouchers === 0,
+    };
 
     return sendSuccess(
       res,
       200,
-      "Voucher status updated successfully",
-      voucher
+      "Voucher updated successfully",
+      voucherDetails
     );
   } catch (error) {
-    console.error("Error updating voucher status:", error);
+    console.error("Error updating voucher:", error);
 
     if (error.name === "CastError") {
       return sendError(res, 400, "Invalid ID format");
@@ -613,16 +704,12 @@ export const updateVoucherStatus = async (req, res) => {
       return sendError(res, 400, "Validation failed", { errors });
     }
 
-    return sendError(
-      res,
-      500,
-      "Failed to update voucher status. Please try again"
-    );
+    return sendError(res, 500, "Failed to update voucher. Please try again");
   }
 };
 
 /**
- * Delete voucher (Soft delete) (Admin)
+ * Delete voucher batch (Soft delete) (Admin)
  * @access Admin only
  */
 export const deleteVoucher = async (req, res) => {
@@ -644,9 +731,20 @@ export const deleteVoucher = async (req, res) => {
     voucher.deletedAt = new Date();
     await voucher.save();
 
-    await voucher.populate("subscriptionId customerId usedForOrder");
+    await voucher.populate("subscriptionId customerId");
 
-    return sendSuccess(res, 200, "Voucher deleted successfully", voucher);
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers: voucher.totalVouchers - voucher.remainingVouchers,
+      isExhausted: voucher.remainingVouchers === 0,
+    };
+
+    return sendSuccess(
+      res,
+      200,
+      "Voucher deleted successfully",
+      voucherDetails
+    );
   } catch (error) {
     console.error("Error deleting voucher:", error);
 
@@ -659,7 +757,7 @@ export const deleteVoucher = async (req, res) => {
 };
 
 /**
- * Restore deleted voucher (Admin)
+ * Restore deleted voucher batch (Admin)
  * @access Admin only
  */
 export const restoreVoucher = async (req, res) => {
@@ -685,9 +783,20 @@ export const restoreVoucher = async (req, res) => {
     voucher.deletedAt = null;
     await voucher.save();
 
-    await voucher.populate("subscriptionId customerId usedForOrder");
+    await voucher.populate("subscriptionId customerId");
 
-    return sendSuccess(res, 200, "Voucher restored successfully", voucher);
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers: voucher.totalVouchers - voucher.remainingVouchers,
+      isExhausted: voucher.remainingVouchers === 0,
+    };
+
+    return sendSuccess(
+      res,
+      200,
+      "Voucher restored successfully",
+      voucherDetails
+    );
   } catch (error) {
     console.error("Error restoring voucher:", error);
 
@@ -733,80 +842,69 @@ export const updateExpiredVouchers = async (_req, res) => {
 /**
  * Get voucher statistics (Admin)
  * @access Admin only
- * @description Get analytics and statistics about vouchers
+ * @description Get analytics and statistics about voucher batches
  */
 export const getVoucherStats = async (_req, res) => {
   try {
-    const [
-      totalVouchers,
-      availableVouchers,
-      usedVouchers,
-      expiredVouchers,
-      vouchersByMealType,
-      usageByDate,
-    ] = await Promise.all([
-      Voucher.countDocuments({ isDeleted: false }),
-      Voucher.countDocuments({
-        isUsed: false,
-        isExpired: false,
-        isDeleted: false,
-        expiryDate: { $gt: new Date() },
-      }),
-      Voucher.countDocuments({ isUsed: true, isDeleted: false }),
-      Voucher.countDocuments({ isExpired: true, isDeleted: false }),
-      Voucher.aggregate([
-        { $match: { isDeleted: false } },
-        {
-          $group: {
-            _id: "$mealType",
-            total: { $sum: 1 },
-            used: {
-              $sum: { $cond: [{ $eq: ["$isUsed", true] }, 1, 0] },
-            },
-            available: {
-              $sum: {
-                $cond: [
-                  {
-                    $and: [
-                      { $eq: ["$isUsed", false] },
-                      { $eq: ["$isExpired", false] },
-                      { $gt: ["$expiryDate", new Date()] },
-                    ],
-                  },
-                  1,
-                  0,
-                ],
-              },
-            },
-          },
+    const totalBatches = await Voucher.countDocuments({ isDeleted: false });
+    const expiredBatches = await Voucher.countDocuments({
+      isExpired: true,
+      isDeleted: false,
+    });
+
+    // Aggregate total voucher counts
+    const voucherTotals = await Voucher.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $group: {
+          _id: null,
+          totalVouchersIssued: { $sum: "$totalVouchers" },
+          totalRemainingVouchers: { $sum: "$remainingVouchers" },
         },
-      ]),
-      Voucher.aggregate([
-        { $match: { isUsed: true, isDeleted: false } },
-        {
-          $group: {
-            _id: {
-              $dateToString: { format: "%Y-%m-%d", date: "$usedDate" },
-            },
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { _id: -1 } },
-        { $limit: 30 }, // Last 30 days
-      ]),
+      },
     ]);
 
+    // Aggregate vouchers by meal type
+    const vouchersByMealType = await Voucher.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $group: {
+          _id: "$mealType",
+          totalIssued: { $sum: "$totalVouchers" },
+          remaining: { $sum: "$remainingVouchers" },
+          batches: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Get vouchers with remaining count
+    const batchesWithRemaining = await Voucher.countDocuments({
+      isDeleted: false,
+      remainingVouchers: { $gt: 0 },
+      isExpired: false,
+      expiryDate: { $gt: new Date() },
+    });
+
+    const totals = voucherTotals[0] || {
+      totalVouchersIssued: 0,
+      totalRemainingVouchers: 0,
+    };
+    const usedVouchers =
+      totals.totalVouchersIssued - totals.totalRemainingVouchers;
     const usageRate =
-      totalVouchers > 0 ? ((usedVouchers / totalVouchers) * 100).toFixed(2) : 0;
+      totals.totalVouchersIssued > 0
+        ? ((usedVouchers / totals.totalVouchersIssued) * 100).toFixed(2)
+        : 0;
 
     return sendSuccess(res, 200, "Voucher statistics retrieved successfully", {
-      totalVouchers,
-      availableVouchers,
+      totalBatches,
+      expiredBatches,
+      batchesWithRemaining,
+      totalVouchersIssued: totals.totalVouchersIssued,
+      availableVouchers: totals.totalRemainingVouchers,
       usedVouchers,
-      expiredVouchers,
       usageRate: `${usageRate}%`,
       vouchersByMealType,
-      recentUsage: usageByDate,
     });
   } catch (error) {
     console.error("Error fetching voucher statistics:", error);
@@ -819,9 +917,9 @@ export const getVoucherStats = async (_req, res) => {
 };
 
 /**
- * Get vouchers by subscription (Admin)
+ * Get voucher batch by subscription (Admin)
  * @access Admin only
- * @description Get all vouchers for a specific subscription
+ * @description Get the voucher batch for a specific subscription
  */
 export const getVouchersBySubscription = async (req, res) => {
   try {
@@ -831,46 +929,56 @@ export const getVouchersBySubscription = async (req, res) => {
       return sendError(res, 400, "Subscription ID is required");
     }
 
-    const vouchers = await Voucher.find({
+    // Since there's only ONE voucher batch per subscription now
+    const voucher = await Voucher.findOne({
       subscriptionId,
       isDeleted: false,
     })
-      .populate("customerId usedForOrder")
+      .populate("customerId subscriptionId")
       .sort({ issuedDate: 1 });
 
-    const summary = {
-      total: vouchers.length,
-      used: vouchers.filter((v) => v.isUsed).length,
-      available: vouchers.filter(
-        (v) => !v.isUsed && !v.isExpired && new Date() <= v.expiryDate
-      ).length,
-      expired: vouchers.filter((v) => v.isExpired).length,
+    if (!voucher) {
+      return sendError(
+        res,
+        404,
+        "Voucher batch not found for this subscription"
+      );
+    }
+
+    const usedVouchers = voucher.totalVouchers - voucher.remainingVouchers;
+    const isAvailable =
+      voucher.remainingVouchers > 0 &&
+      !voucher.isExpired &&
+      new Date() <= voucher.expiryDate;
+
+    const voucherDetails = {
+      ...voucher.toObject(),
+      usedVouchers,
+      isExhausted: voucher.remainingVouchers === 0,
+      isAvailable,
     };
 
     return sendSuccess(
       res,
       200,
-      "Vouchers retrieved successfully",
-      {
-        vouchers,
-        summary,
-      }
+      "Voucher batch retrieved successfully",
+      voucherDetails
     );
   } catch (error) {
-    console.error("Error fetching vouchers by subscription:", error);
+    console.error("Error fetching voucher by subscription:", error);
 
     if (error.name === "CastError") {
       return sendError(res, 400, "Invalid subscription ID format");
     }
 
-    return sendError(res, 500, "Failed to fetch vouchers. Please try again");
+    return sendError(res, 500, "Failed to fetch voucher. Please try again");
   }
 };
 
 /**
- * Bulk delete vouchers by subscription (Admin)
+ * Delete voucher batch by subscription (Admin)
  * @access Admin only
- * @description Soft delete all vouchers for a subscription
+ * @description Soft delete the voucher batch for a subscription
  */
 export const bulkDeleteVouchersBySubscription = async (req, res) => {
   try {
@@ -880,7 +988,8 @@ export const bulkDeleteVouchersBySubscription = async (req, res) => {
       return sendError(res, 400, "Subscription ID is required");
     }
 
-    const result = await Voucher.updateMany(
+    // Since there's only ONE voucher batch per subscription
+    const result = await Voucher.updateOne(
       {
         subscriptionId,
         isDeleted: false,
@@ -893,16 +1002,15 @@ export const bulkDeleteVouchersBySubscription = async (req, res) => {
       }
     );
 
-    return sendSuccess(
-      res,
-      200,
-      "Vouchers deleted successfully",
-      {
-        deletedCount: result.modifiedCount,
-      }
-    );
+    if (result.modifiedCount === 0) {
+      return sendError(res, 404, "Voucher batch not found or already deleted");
+    }
+
+    return sendSuccess(res, 200, "Voucher batch deleted successfully", {
+      deletedCount: result.modifiedCount,
+    });
   } catch (error) {
-    console.error("Error bulk deleting vouchers:", error);
+    console.error("Error deleting voucher batch:", error);
 
     if (error.name === "CastError") {
       return sendError(res, 400, "Invalid subscription ID format");
@@ -911,7 +1019,7 @@ export const bulkDeleteVouchersBySubscription = async (req, res) => {
     return sendError(
       res,
       500,
-      "Failed to delete vouchers. Please try again"
+      "Failed to delete voucher batch. Please try again"
     );
   }
 };

@@ -8,11 +8,7 @@ const voucherSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Subscription",
       required: [true, "Subscription reference is required"],
-    },
-    usedForOrder: {
-      type: Schema.Types.ObjectId,
-      ref: "Order",
-      default: null,
+      unique: true, // One voucher record per subscription
     },
     customerId: {
       type: Schema.Types.ObjectId,
@@ -45,24 +41,36 @@ const voucherSchema = new Schema(
       },
       immutable: true,
     },
-    isUsed: {
-      type: Boolean,
-      default: false,
+    totalVouchers: {
+      type: Number,
+      required: [true, "Total vouchers is required"],
+      min: [1, "Total vouchers must be at least 1"],
+      validate: {
+        validator: Number.isInteger,
+        message: "Total vouchers must be a whole number",
+      },
+      immutable: true,
+    },
+    remainingVouchers: {
+      type: Number,
+      required: [true, "Remaining vouchers is required"],
+      min: [0, "Remaining vouchers cannot be negative"],
+      validate: [
+        {
+          validator: Number.isInteger,
+          message: "Remaining vouchers must be a whole number",
+        },
+        {
+          validator: function (value) {
+            return value <= this.totalVouchers;
+          },
+          message: "Remaining vouchers cannot exceed total vouchers",
+        },
+      ],
     },
     isExpired: {
       type: Boolean,
       default: false,
-    },
-    usedDate: {
-      type: Date,
-      default: null,
-      validate: {
-        validator: function (value) {
-          if (!value) return true;
-          return value <= new Date();
-        },
-        message: "Used date cannot be in the future",
-      },
     },
     isDeleted: {
       type: Boolean,
@@ -92,16 +100,15 @@ const voucherSchema = new Schema(
 );
 
 // Customer voucher queries
-voucherSchema.index({ customerId: 1, isUsed: 1, isExpired: 1, isDeleted: 1 });
+voucherSchema.index({ customerId: 1, isExpired: 1, isDeleted: 1 });
 voucherSchema.index({ customerId: 1, expiryDate: 1 });
-voucherSchema.index({ customerId: 1, mealType: 1, isUsed: 1 });
+voucherSchema.index({ customerId: 1, mealType: 1, remainingVouchers: 1 });
 
-// Subscription vouchers
+// Subscription vouchers (unique index is already on subscriptionId in schema)
 voucherSchema.index({ subscriptionId: 1, customerId: 1 });
 
-// Usage tracking
-voucherSchema.index({ usedDate: 1, usedForOrder: 1 });
-voucherSchema.index({ isUsed: 1, isDeleted: 1 });
+// Voucher availability tracking
+voucherSchema.index({ remainingVouchers: 1, isExpired: 1, isDeleted: 1 });
 
 // Expiry management
 voucherSchema.index({ expiryDate: 1, isExpired: 1 });

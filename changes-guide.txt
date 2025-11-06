@@ -1,0 +1,1303 @@
+TIFFIN DABBA BACKEND - CHANGES GUIDE
+=====================================
+This guide is structured for phase-based execution with verification steps.
+Execute each phase completely before moving to the next.
+
+═══════════════════════════════════════════════════════════════════════════
+PHASE 0: VERIFICATION & ASSESSMENT
+═══════════════════════════════════════════════════════════════════════════
+
+Before making any changes, verify which issues actually exist:
+
+STEP 0.1: Verify Bug #1 - Addon Field Mismatch
+-----------------------------------------------
+CHECK:
+1. Open: src/schema/Addon.schema.js
+   - Look for the boolean field that controls addon availability
+   - Confirm if it's named "isLive" or "isActive"
+
+2. Open: src/Order/order.controller.js:161
+   - Find the Addon.find() query
+   - Check what field name is being used in the query
+
+EXPECTED FINDING:
+- Schema defines: isLive (boolean)
+- Controller uses: isActive (MISMATCH)
+
+IF MISMATCH EXISTS → Mark for Phase 1 fix
+IF NO MISMATCH → Document and skip
+
+
+STEP 0.2: Verify Bug #2 - Subscription Days Parsing
+----------------------------------------------------
+CHECK:
+1. Open: src/schema/SubscriptionPlan.schema.js
+   - Find the "days" field definition
+   - Confirm it's an ENUM with values: ["7D", "14D", "30D", "60D"]
+
+2. Open: src/Subscription/subscription.controller.js:94
+   - Find the expiry date calculation
+   - Check if plan.days is being parsed before arithmetic operation
+
+EXPECTED FINDING:
+- Schema has days as string ENUM: "7D", "14D", etc.
+- Controller does: expiryDate.setDate(expiryDate.getDate() + plan.days)
+- String + Number = NaN or unexpected behavior
+
+IF PARSING MISSING → Mark for Phase 1 fix
+IF ALREADY PARSED → Document and skip
+
+
+STEP 0.3: Assess Kitchen Staff Endpoints
+-----------------------------------------
+CHECK:
+1. Open: src/Order/order.controller.js
+   - Look for kitchen-specific functions:
+     * acceptOrderForKitchen / acceptOrder
+     * rejectOrder
+     * updateOrderPreparationStatus
+     * markOrderReadyForDelivery
+     * bulkAcceptOrders
+
+2. Open: src/Order/order.route.js
+   - Check which kitchen functions are exposed as routes
+   - Verify auth.middleware with "kitchenStaff" role
+
+DOCUMENT:
+- Which controller functions exist
+- Which routes are missing
+- Mark incomplete items for Phase 2
+
+
+STEP 0.4: Assess Delivery Management System
+--------------------------------------------
+CHECK:
+1. Open: src/Order/order.controller.js
+   - Look for: assignDriver function
+   - Look for: delivery status update functions
+
+2. Open: src/schema/DeliveryDriver.schema.js
+   - Check if location tracking fields exist
+   - Check availability status fields
+
+3. Check if route optimization utilities exist in:
+   - src/utils/ directory
+
+DOCUMENT:
+- What exists vs what's missing
+- Mark for Phase 3
+
+
+STEP 0.5: Check Admin Dashboard Endpoints
+------------------------------------------
+CHECK:
+1. Open: src/routes.js
+   - Look for admin-specific routes
+   - Check for dashboard/analytics endpoints
+
+2. Open: src/Order/order.controller.js & src/Subscription/subscription.controller.js
+   - Look for getStats, getDashboard, or similar functions
+
+DOCUMENT:
+- Admin routes that exist
+- Missing dashboard functionality
+- Mark for Phase 4
+
+
+STEP 0.6: Check Refund System
+------------------------------
+CHECK:
+1. Search codebase for:
+   - "refund" keyword in controllers
+   - Refund schema or model
+
+2. Open: src/schema/Order.schema.js
+   - Check for refund-related fields (refundStatus, refundAmount, etc.)
+
+DOCUMENT:
+- Refund infrastructure that exists
+- Missing components
+- Mark for Phase 5
+
+
+═══════════════════════════════════════════════════════════════════════════
+PHASE 1: CRITICAL BUG FIXES (High Priority)
+═══════════════════════════════════════════════════════════════════════════
+
+⚠️  These bugs break core functionality. Fix immediately if verified.
+
+
+FIX 1.1: Addon Query Field Mismatch
+------------------------------------
+IF VERIFIED IN STEP 0.1:
+
+FILE: src/Order/order.controller.js
+LINE: ~161 (in createOrder function)
+
+CHANGE FROM:
+```javascript
+const addons = await Addon.find({
+  _id: { $in: addonIds },
+  isActive: true,
+  isDeleted: false,
+});
+```
+
+CHANGE TO:
+```javascript
+const addons = await Addon.find({
+  _id: { $in: addonIds },
+  isLive: true,
+  isDeleted: false,
+});
+```
+
+REASON: Addon schema uses "isLive" not "isActive"
+
+TEST AFTER FIX:
+- Create an order with addons
+- Verify addons are properly fetched
+- Verify inactive addons are excluded
+
+
+FIX 1.2: Subscription Days Parsing
+-----------------------------------
+IF VERIFIED IN STEP 0.2:
+
+FILE: src/Subscription/subscription.controller.js
+LINE: ~94 (in createSubscription function)
+
+CHANGE FROM:
+```javascript
+const expiryDate = new Date(startDate);
+expiryDate.setDate(expiryDate.getDate() + plan.days);
+```
+
+CHANGE TO:
+```javascript
+const expiryDate = new Date(startDate);
+const daysCount = parseInt(plan.days); // Parse "7D" -> 7, "30D" -> 30
+expiryDate.setDate(expiryDate.getDate() + daysCount);
+```
+
+REASON: plan.days is string ENUM ("7D", "14D", etc.), needs parsing
+
+TEST AFTER FIX:
+- Create a subscription with each plan type
+- Verify expiry dates are calculated correctly
+- Check: 7D plan expires 7 days from start, etc.
+
+
+═══════════════════════════════════════════════════════════════════════════
+PHASE 2: KITCHEN STAFF ENDPOINTS (Medium Priority)
+═══════════════════════════════════════════════════════════════════════════
+
+Complete kitchen staff order management system.
+
+
+TASK 2.1: Add Missing Kitchen Routes
+-------------------------------------
+IF CONTROLLER FUNCTIONS EXIST BUT ROUTES MISSING:
+
+FILE: src/Order/order.route.js
+
+ADD THESE ROUTES (if not present):
+```javascript
+// Kitchen Staff - Order Management
+router.get(
+  "/kitchen/dashboard",
+  authMiddleware(["kitchenStaff", "admin"]),
+  orderController.getKitchenDashboard
+);
+
+router.post(
+  "/:orderId/accept",
+  authMiddleware(["kitchenStaff", "admin"]),
+  orderController.acceptOrder
+);
+
+router.post(
+  "/:orderId/reject",
+  authMiddleware(["kitchenStaff", "admin"]),
+  orderController.rejectOrder
+);
+
+router.patch(
+  "/:orderId/preparation-status",
+  authMiddleware(["kitchenStaff", "admin"]),
+  orderController.updatePreparationStatus
+);
+
+router.post(
+  "/:orderId/ready",
+  authMiddleware(["kitchenStaff", "admin"]),
+  orderController.markReadyForDelivery
+);
+
+router.post(
+  "/bulk-accept",
+  authMiddleware(["kitchenStaff", "admin"]),
+  orderController.bulkAcceptOrders
+);
+```
+
+
+TASK 2.2: Create Missing Controller Functions
+----------------------------------------------
+IF CONTROLLER FUNCTIONS DON'T EXIST:
+
+FILE: src/Order/order.controller.js
+
+ADD THESE FUNCTIONS:
+
+A. Kitchen Dashboard
+```javascript
+exports.getKitchenDashboard = async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const stats = await Order.aggregate([
+      {
+        $match: {
+          orderDate: { $gte: today },
+          orderStatus: { $in: ["placed", "confirmed", "preparing", "ready"] }
+        }
+      },
+      {
+        $group: {
+          _id: "$orderStatus",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const pendingOrders = await Order.find({
+      orderStatus: "placed",
+      orderDate: { $gte: today }
+    })
+      .populate("customerId", "name phone")
+      .populate("subscriptionId")
+      .sort({ createdAt: 1 });
+
+    res.status(200).json({
+      success: true,
+      stats,
+      pendingOrders
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch kitchen dashboard",
+      error: error.message
+    });
+  }
+};
+```
+
+B. Bulk Accept Orders
+```javascript
+exports.bulkAcceptOrders = async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "orderIds array is required"
+      });
+    }
+
+    const result = await Order.updateMany(
+      {
+        _id: { $in: orderIds },
+        orderStatus: "placed"
+      },
+      {
+        $set: {
+          orderStatus: "confirmed",
+          kitchenAcceptedAt: new Date(),
+          kitchenAcceptedBy: req.user.userId
+        }
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `${result.modifiedCount} orders accepted`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Bulk accept failed",
+      error: error.message
+    });
+  }
+};
+```
+
+C. Update Preparation Status
+```javascript
+exports.updatePreparationStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { preparationStatus } = req.body;
+
+    // preparationStatus: "started", "in-progress", "almost-ready"
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        $set: {
+          preparationStatus,
+          lastUpdatedBy: req.user.userId,
+          lastUpdatedAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      order
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to update preparation status",
+      error: error.message
+    });
+  }
+};
+```
+
+D. Mark Ready for Delivery
+```javascript
+exports.markReadyForDelivery = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        $set: {
+          orderStatus: "ready",
+          preparationStatus: "completed",
+          readyAt: new Date(),
+          readyBy: req.user.userId
+        }
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    // TODO: Notify delivery system to assign driver
+
+    res.status(200).json({
+      success: true,
+      message: "Order marked ready for delivery",
+      order
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark order ready",
+      error: error.message
+    });
+  }
+};
+```
+
+
+TASK 2.3: Update Order Schema (if needed)
+------------------------------------------
+FILE: src/schema/Order.schema.js
+
+VERIFY THESE FIELDS EXIST:
+- preparationStatus (String)
+- kitchenAcceptedAt (Date)
+- kitchenAcceptedBy (ObjectId ref User)
+- readyAt (Date)
+- readyBy (ObjectId ref User)
+- lastUpdatedBy (ObjectId ref User)
+- lastUpdatedAt (Date)
+
+IF MISSING, ADD THEM TO SCHEMA
+
+
+═══════════════════════════════════════════════════════════════════════════
+PHASE 3: DELIVERY MANAGEMENT SYSTEM (Medium Priority)
+═══════════════════════════════════════════════════════════════════════════
+
+Implement driver assignment and delivery tracking.
+
+
+TASK 3.1: Create Delivery Assignment Logic
+-------------------------------------------
+CREATE NEW FILE: src/utils/deliveryAssignment.util.js
+
+```javascript
+const DeliveryDriver = require("../schema/DeliveryDriver.schema");
+const Order = require("../schema/Order.schema");
+
+/**
+ * Find available drivers near the restaurant location
+ * Simple algorithm: Find drivers who are available and not on delivery
+ */
+exports.findAvailableDriver = async (restaurantLocation) => {
+  try {
+    // Find drivers who are:
+    // 1. Verified and active
+    // 2. Currently available (not on delivery)
+    // 3. Within reasonable distance (if location tracking implemented)
+
+    const availableDriver = await DeliveryDriver.findOne({
+      isVerified: true,
+      accountStatus: "active",
+      isAvailable: true,
+      // TODO: Add geospatial query when location tracking is implemented
+      // location: {
+      //   $near: {
+      //     $geometry: restaurantLocation,
+      //     $maxDistance: 5000 // 5km radius
+      //   }
+      // }
+    }).sort({ lastDeliveryAt: 1 }); // Prioritize drivers with oldest last delivery
+
+    return availableDriver;
+  } catch (error) {
+    console.error("Driver search error:", error);
+    return null;
+  }
+};
+
+/**
+ * Assign driver to order
+ */
+exports.assignDriverToOrder = async (orderId, driverId) => {
+  try {
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        $set: {
+          driverId,
+          orderStatus: "out-for-delivery",
+          assignedAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    await DeliveryDriver.findByIdAndUpdate(driverId, {
+      $set: {
+        isAvailable: false,
+        currentOrderId: orderId
+      }
+    });
+
+    return order;
+  } catch (error) {
+    console.error("Driver assignment error:", error);
+    return null;
+  }
+};
+
+/**
+ * Calculate estimated delivery time
+ * Simple calculation: base time + distance factor
+ */
+exports.calculateETA = (distance) => {
+  const baseTime = 20; // 20 minutes base
+  const timePerKm = 3; // 3 minutes per km
+  return baseTime + (distance * timePerKm);
+};
+```
+
+
+TASK 3.2: Add Driver Assignment Controller Functions
+-----------------------------------------------------
+FILE: src/Order/order.controller.js
+
+ADD:
+```javascript
+const {
+  findAvailableDriver,
+  assignDriverToOrder
+} = require("../utils/deliveryAssignment.util");
+
+exports.assignDriverManually = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { driverId } = req.body;
+
+    // Verify driver is available
+    const driver = await DeliveryDriver.findOne({
+      _id: driverId,
+      isVerified: true,
+      accountStatus: "active",
+      isAvailable: true
+    });
+
+    if (!driver) {
+      return res.status(400).json({
+        success: false,
+        message: "Driver not available"
+      });
+    }
+
+    const order = await assignDriverToOrder(orderId, driverId);
+
+    if (!order) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to assign driver"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Driver assigned successfully",
+      order
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Driver assignment failed",
+      error: error.message
+    });
+  }
+};
+
+exports.autoAssignDriver = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    if (order.orderStatus !== "ready") {
+      return res.status(400).json({
+        success: false,
+        message: "Order must be ready before driver assignment"
+      });
+    }
+
+    // TODO: Get restaurant location from config
+    const driver = await findAvailableDriver(null);
+
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: "No available drivers found"
+      });
+    }
+
+    const updatedOrder = await assignDriverToOrder(orderId, driver._id);
+
+    res.status(200).json({
+      success: true,
+      message: "Driver auto-assigned",
+      order: updatedOrder,
+      driver: {
+        id: driver._id,
+        name: driver.name,
+        phone: driver.phone,
+        vehicleNumber: driver.vehicleNumber
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Auto-assignment failed",
+      error: error.message
+    });
+  }
+};
+```
+
+
+TASK 3.3: Add Driver Routes for Delivery Updates
+-------------------------------------------------
+FILE: src/Auth/driver.auth.route.js (or create src/Driver/driver.route.js)
+
+ADD:
+```javascript
+// Driver updates delivery status
+router.patch(
+  "/orders/:orderId/status",
+  authMiddleware(["driver"]),
+  driverController.updateDeliveryStatus
+);
+
+// Driver confirms pickup from kitchen
+router.post(
+  "/orders/:orderId/pickup",
+  authMiddleware(["driver"]),
+  driverController.confirmPickup
+);
+
+// Driver confirms delivery
+router.post(
+  "/orders/:orderId/deliver",
+  authMiddleware(["driver"]),
+  driverController.confirmDelivery
+);
+
+// Get driver's current assigned orders
+router.get(
+  "/my-deliveries",
+  authMiddleware(["driver"]),
+  driverController.getMyDeliveries
+);
+```
+
+
+TASK 3.4: Create Driver Controller Functions
+---------------------------------------------
+CREATE FILE: src/Driver/driver.controller.js
+
+```javascript
+const Order = require("../schema/Order.schema");
+const DeliveryDriver = require("../schema/DeliveryDriver.schema");
+
+exports.getMyDeliveries = async (req, res) => {
+  try {
+    const driverId = req.user.userId;
+
+    const orders = await Order.find({
+      driverId,
+      orderStatus: { $in: ["out-for-delivery", "ready"] }
+    })
+      .populate("customerId", "name phone address")
+      .populate("subscriptionId")
+      .sort({ assignedAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      orders
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch deliveries",
+      error: error.message
+    });
+  }
+};
+
+exports.confirmPickup = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const driverId = req.user.userId;
+
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        driverId,
+        orderStatus: "ready"
+      },
+      {
+        $set: {
+          orderStatus: "out-for-delivery",
+          pickedUpAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found or already picked up"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Pickup confirmed",
+      order
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Pickup confirmation failed",
+      error: error.message
+    });
+  }
+};
+
+exports.confirmDelivery = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const driverId = req.user.userId;
+
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        driverId,
+        orderStatus: "out-for-delivery"
+      },
+      {
+        $set: {
+          orderStatus: "delivered",
+          deliveredAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found or not out for delivery"
+      });
+    }
+
+    // Mark driver as available again
+    await DeliveryDriver.findByIdAndUpdate(driverId, {
+      $set: {
+        isAvailable: true,
+        lastDeliveryAt: new Date()
+      },
+      $unset: { currentOrderId: "" }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Delivery confirmed",
+      order
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Delivery confirmation failed",
+      error: error.message
+    });
+  }
+};
+
+exports.updateDeliveryStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { status, location } = req.body;
+    const driverId = req.user.userId;
+
+    // Update driver location if provided
+    if (location) {
+      await DeliveryDriver.findByIdAndUpdate(driverId, {
+        $set: {
+          "location.coordinates": [location.longitude, location.latitude],
+          "location.lastUpdated": new Date()
+        }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Status updated"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Status update failed",
+      error: error.message
+    });
+  }
+};
+```
+
+
+TASK 3.5: Update Schemas for Delivery Fields
+---------------------------------------------
+FILE: src/schema/Order.schema.js
+
+VERIFY/ADD THESE FIELDS:
+- driverId (ObjectId ref DeliveryDriver)
+- assignedAt (Date)
+- pickedUpAt (Date)
+- deliveredAt (Date)
+
+FILE: src/schema/DeliveryDriver.schema.js
+
+VERIFY/ADD THESE FIELDS:
+- isAvailable (Boolean)
+- currentOrderId (ObjectId ref Order)
+- lastDeliveryAt (Date)
+
+
+═══════════════════════════════════════════════════════════════════════════
+PHASE 4: ADMIN DASHBOARD APIs (Low Priority)
+═══════════════════════════════════════════════════════════════════════════
+
+Add analytics and dashboard endpoints for admin panel.
+
+
+TASK 4.1: Create Admin Dashboard Controller
+--------------------------------------------
+CREATE FILE: src/Admin/admin.dashboard.controller.js
+
+```javascript
+const Order = require("../schema/Order.schema");
+const Subscription = require("../schema/Subscription.schema");
+const Customer = require("../schema/Customer.schema");
+const DeliveryDriver = require("../schema/DeliveryDriver.schema");
+
+exports.getOverallStats = async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [
+      totalCustomers,
+      activeSubscriptions,
+      todayOrders,
+      activeDrivers,
+      revenue
+    ] = await Promise.all([
+      Customer.countDocuments(),
+      Subscription.countDocuments({ status: "active" }),
+      Order.countDocuments({ orderDate: { $gte: today } }),
+      DeliveryDriver.countDocuments({
+        accountStatus: "active",
+        isVerified: true
+      }),
+      Order.aggregate([
+        {
+          $match: {
+            paymentStatus: "completed",
+            orderDate: { $gte: today }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$totalAmount" }
+          }
+        }
+      ])
+    ]);
+
+    res.status(200).json({
+      success: true,
+      stats: {
+        totalCustomers,
+        activeSubscriptions,
+        todayOrders,
+        activeDrivers,
+        todayRevenue: revenue[0]?.total || 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch stats",
+      error: error.message
+    });
+  }
+};
+
+exports.getOrderAnalytics = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    const matchStage = {};
+    if (startDate && endDate) {
+      matchStage.orderDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    const analytics = await Order.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$orderDate" } },
+            status: "$orderStatus"
+          },
+          count: { $sum: 1 },
+          revenue: { $sum: "$totalAmount" }
+        }
+      },
+      { $sort: { "_id.date": -1 } }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      analytics
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch analytics",
+      error: error.message
+    });
+  }
+};
+
+exports.getRevenueReport = async (req, res) => {
+  try {
+    const { period = "month" } = req.query; // day, week, month, year
+
+    let groupBy;
+    switch (period) {
+      case "day":
+        groupBy = { $dateToString: { format: "%Y-%m-%d", date: "$orderDate" } };
+        break;
+      case "week":
+        groupBy = { $week: "$orderDate" };
+        break;
+      case "month":
+        groupBy = { $dateToString: { format: "%Y-%m", date: "$orderDate" } };
+        break;
+      case "year":
+        groupBy = { $year: "$orderDate" };
+        break;
+      default:
+        groupBy = { $dateToString: { format: "%Y-%m", date: "$orderDate" } };
+    }
+
+    const revenue = await Order.aggregate([
+      {
+        $match: {
+          paymentStatus: "completed"
+        }
+      },
+      {
+        $group: {
+          _id: groupBy,
+          totalRevenue: { $sum: "$totalAmount" },
+          orderCount: { $sum: 1 },
+          avgOrderValue: { $avg: "$totalAmount" }
+        }
+      },
+      { $sort: { _id: -1 } },
+      { $limit: 30 }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      period,
+      revenue
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch revenue report",
+      error: error.message
+    });
+  }
+};
+```
+
+
+TASK 4.2: Add Admin Dashboard Routes
+-------------------------------------
+FILE: src/Admin/admin.route.js (or create if doesn't exist)
+
+```javascript
+const router = require("express").Router();
+const dashboardController = require("./admin.dashboard.controller");
+const authMiddleware = require("../middleware/auth.middleware");
+
+router.get(
+  "/dashboard/stats",
+  authMiddleware(["admin"]),
+  dashboardController.getOverallStats
+);
+
+router.get(
+  "/dashboard/orders",
+  authMiddleware(["admin"]),
+  dashboardController.getOrderAnalytics
+);
+
+router.get(
+  "/dashboard/revenue",
+  authMiddleware(["admin"]),
+  dashboardController.getRevenueReport
+);
+
+module.exports = router;
+```
+
+REGISTER IN: src/routes.js
+
+
+═══════════════════════════════════════════════════════════════════════════
+PHASE 5: REFUND SYSTEM (Low Priority)
+═══════════════════════════════════════════════════════════════════════════
+
+Implement order refund and voucher restoration.
+
+
+TASK 5.1: Add Refund Fields to Order Schema
+--------------------------------------------
+FILE: src/schema/Order.schema.js
+
+ADD THESE FIELDS:
+```javascript
+refundStatus: {
+  type: String,
+  enum: ["none", "pending", "processed", "rejected"],
+  default: "none"
+},
+refundAmount: {
+  type: Number,
+  default: 0
+},
+refundReason: String,
+refundRequestedAt: Date,
+refundProcessedAt: Date,
+refundProcessedBy: {
+  type: Schema.Types.ObjectId,
+  ref: "Admin"
+}
+```
+
+
+TASK 5.2: Create Refund Controller Functions
+---------------------------------------------
+FILE: src/Order/order.controller.js
+
+ADD:
+```javascript
+exports.requestRefund = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { reason } = req.body;
+    const customerId = req.user.userId;
+
+    const order = await Order.findOne({
+      _id: orderId,
+      customerId
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    // Check if refund already requested
+    if (order.refundStatus !== "none") {
+      return res.status(400).json({
+        success: false,
+        message: "Refund already requested for this order"
+      });
+    }
+
+    // Can only refund if order is not delivered/completed
+    if (order.orderStatus === "delivered" || order.orderStatus === "completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot refund delivered orders"
+      });
+    }
+
+    order.refundStatus = "pending";
+    order.refundReason = reason;
+    order.refundRequestedAt = new Date();
+    order.refundAmount = order.totalAmount;
+
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Refund request submitted",
+      order
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Refund request failed",
+      error: error.message
+    });
+  }
+};
+
+exports.processRefund = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { action, adminNotes } = req.body; // action: "approve" or "reject"
+    const adminId = req.user.userId;
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    if (order.refundStatus !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "No pending refund for this order"
+      });
+    }
+
+    if (action === "approve") {
+      order.refundStatus = "processed";
+      order.refundProcessedAt = new Date();
+      order.refundProcessedBy = adminId;
+      order.orderStatus = "refunded";
+
+      // If voucher was used, restore it
+      if (order.voucherUsed) {
+        const Voucher = require("../schema/Voucher.schema");
+        await Voucher.findByIdAndUpdate(order.voucherUsed, {
+          $inc: { usageCount: -1 }
+        });
+      }
+
+      // TODO: Process payment refund via payment gateway
+
+      await order.save();
+
+      res.status(200).json({
+        success: true,
+        message: "Refund processed successfully",
+        order
+      });
+    } else if (action === "reject") {
+      order.refundStatus = "rejected";
+      order.refundProcessedAt = new Date();
+      order.refundProcessedBy = adminId;
+      order.adminNotes = adminNotes;
+
+      await order.save();
+
+      res.status(200).json({
+        success: true,
+        message: "Refund rejected",
+        order
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid action. Use 'approve' or 'reject'"
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Refund processing failed",
+      error: error.message
+    });
+  }
+};
+
+exports.getRefundRequests = async (req, res) => {
+  try {
+    const { status = "pending" } = req.query;
+
+    const refunds = await Order.find({
+      refundStatus: status
+    })
+      .populate("customerId", "name phone email")
+      .populate("refundProcessedBy", "name")
+      .sort({ refundRequestedAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      refunds
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch refund requests",
+      error: error.message
+    });
+  }
+};
+```
+
+
+TASK 5.3: Add Refund Routes
+----------------------------
+FILE: src/Order/order.route.js
+
+ADD:
+```javascript
+// Customer requests refund
+router.post(
+  "/:orderId/refund",
+  authMiddleware(["customer"]),
+  orderController.requestRefund
+);
+
+// Admin views refund requests
+router.get(
+  "/refunds",
+  authMiddleware(["admin"]),
+  orderController.getRefundRequests
+);
+
+// Admin processes refund
+router.post(
+  "/:orderId/refund/process",
+  authMiddleware(["admin"]),
+  orderController.processRefund
+);
+```
+
+
+═══════════════════════════════════════════════════════════════════════════
+POST-IMPLEMENTATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════
+
+After completing all phases, verify:
+
+□ Phase 1: Both bugs fixed and tested
+□ Phase 2: Kitchen staff can accept/reject orders, update status
+□ Phase 3: Drivers can be assigned, pickup and deliver orders
+□ Phase 4: Admin dashboard shows stats and analytics
+□ Phase 5: Refund requests can be submitted and processed
+
+□ All routes registered in src/routes.js
+□ All middleware properly applied
+□ Error handling in place for all endpoints
+□ Database indexes created for frequently queried fields
+□ API documentation updated
+
+□ Test each phase independently before moving to next
+□ Run npm test (if tests exist)
+□ Test with Postman/Thunder Client
+□ Check console for deprecation warnings
+
+═══════════════════════════════════════════════════════════════════════════
+NOTES FOR AI EXECUTION
+═══════════════════════════════════════════════════════════════════════════
+
+- Execute phases sequentially: 0 → 1 → 2 → 3 → 4 → 5
+- Complete verification (Phase 0) BEFORE any changes
+- Document any deviations from expected findings
+- If a bug doesn't exist, note it and skip that fix
+- Test each phase before moving to next
+- Ask for clarification if schema structure differs significantly
+- Update this guide with actual line numbers after verification
+- Keep track of which tasks are completed vs skipped
+
+END OF GUIDE

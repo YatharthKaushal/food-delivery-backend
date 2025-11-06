@@ -14,7 +14,4 @@ customer can set auto order if the customer has any remainin vouchers
 the vouchers can be used to order any meal (dinner or lunch), it will have 3 months expiry from the issued date (date of purchase of subscription plan)
 vouchers cannot be purchased individually.
 
-in future we might implement such plans like, only lunch or only dinner or included both. initially we will have included both.
-
-in case of only lunch or only dinner, the voucher issued within only lunch cannot be used for dinner and vouchers issued within only dinner plan cannot be used for lunch.
 

@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import Admin from "../schema/Admin.js";
+import DeliveryDriver from "../schema/DeliveryDriver.schema.js";
 import { sendError } from "../utils/response.util.js";
 
 /**
@@ -55,6 +56,26 @@ export const authenticate = async (req, res, next) => {
         username: admin.username,
         role: admin.role,
         type: "admin",
+      };
+    } else if (decoded.type === "driver") {
+      const driver = await DeliveryDriver.findOne({
+        _id: decoded.id,
+        isDeleted: false,
+      });
+
+      if (!driver) {
+        return sendError(
+          res,
+          401,
+          "User no longer exists or has been deactivated"
+        );
+      }
+
+      // Attach driver info to request
+      req.user = {
+        id: driver._id,
+        username: driver.username,
+        type: "driver",
       };
     } else {
       return sendError(res, 401, "Invalid token type");

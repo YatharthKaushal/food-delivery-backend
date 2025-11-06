@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import Admin, { ADMIN_ROLES } from "../schema/Admin.js";
 import { sendSuccess, sendError } from "../utils/response.util.js";
+import { HTTP_STATUS, ERROR_MESSAGES } from "../constants/index.js";
 
 /**
  * Register a new admin user
@@ -16,7 +17,7 @@ export const registerAdmin = async (req, res) => {
     if (!name || !username || !password) {
       return sendError(
         res,
-        400,
+        HTTP_STATUS.BAD_REQUEST,
         "Name, username, and password are required fields"
       );
     }
@@ -25,7 +26,7 @@ export const registerAdmin = async (req, res) => {
     if (role && !Object.values(ADMIN_ROLES).includes(role.toUpperCase())) {
       return sendError(
         res,
-        400,
+        HTTP_STATUS.BAD_REQUEST,
         `Invalid role. Must be either ${ADMIN_ROLES.ADMIN} or ${ADMIN_ROLES.KITCHEN_STAFF}`
       );
     }
@@ -39,7 +40,7 @@ export const registerAdmin = async (req, res) => {
     if (existingAdmin) {
       return sendError(
         res,
-        409,
+        HTTP_STATUS.CONFLICT,
         "Username already exists. Please choose a different username"
       );
     }
@@ -54,7 +55,7 @@ export const registerAdmin = async (req, res) => {
       if (existingEmail) {
         return sendError(
           res,
-          409,
+          HTTP_STATUS.CONFLICT,
           "Email already registered. Please use a different email"
         );
       }
@@ -78,7 +79,7 @@ export const registerAdmin = async (req, res) => {
     await newAdmin.save();
 
     // Return success response (exclude password)
-    return sendSuccess(res, 201, "Admin registered successfully", {
+    return sendSuccess(res, HTTP_STATUS.CREATED, "Admin registered successfully", {
       admin: {
         id: newAdmin._id,
         name: newAdmin.name,
@@ -103,12 +104,12 @@ export const registerAdmin = async (req, res) => {
       const field = Object.keys(error.keyPattern)[0];
       return sendError(
         res,
-        409,
+        HTTP_STATUS.CONFLICT,
         `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`
       );
     }
 
-    return sendError(res, 500, "Failed to register admin. Please try again");
+    return sendError(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to register admin. Please try again");
   }
 };
 
@@ -133,14 +134,14 @@ export const loginAdmin = async (req, res) => {
     }).select("+password");
 
     if (!admin) {
-      return sendError(res, 401, "Invalid username or password");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, "Invalid username or password");
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, admin.password);
 
     if (!isPasswordValid) {
-      return sendError(res, 401, "Invalid username or password");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, "Invalid username or password");
     }
 
     // Generate JWT token
@@ -158,7 +159,7 @@ export const loginAdmin = async (req, res) => {
     );
 
     // Return success response with token
-    return sendSuccess(res, 200, "Login successful", {
+    return sendSuccess(res, HTTP_STATUS.OK, "Login successful", {
       token,
       admin: {
         id: admin._id,
@@ -171,6 +172,6 @@ export const loginAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("Admin login error:", error);
-    return sendError(res, 500, "Failed to login. Please try again");
+    return sendError(res, HTTP_STATUS.INTERNAL_SERVER_ERROR, "Failed to login. Please try again");
   }
 };

@@ -1,7 +1,15 @@
 import Subscription from "../schema/Subscription.schema.js";
 import SubscriptionPlan from "../schema/SubscriptionPlan.schema.js";
 import Customer from "../schema/Customer.schema.js";
+import Voucher from "../schema/Voucher.schema.js";
 import { sendSuccess, sendError } from "../utils/response.util.js";
+import {
+  HTTP_STATUS,
+  SUBSCRIPTION_STATUS,
+  PLAN_TYPES,
+  PAGINATION,
+  ERROR_MESSAGES,
+} from "../constants/index.js";
 
 /**
  * Create a new subscription (Purchase subscription)
@@ -15,13 +23,13 @@ export const createSubscription = async (req, res) => {
 
     // Validate required fields
     if (!planId || amountPaid === undefined) {
-      return sendError(res, 400, "Missing required fields", {
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Missing required fields", {
         required: ["planId", "amountPaid"],
       });
     }
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer by Firebase UID
@@ -52,7 +60,7 @@ export const createSubscription = async (req, res) => {
     // Validate amount paid matches plan price (with small tolerance for rounding)
     const priceDifference = Math.abs(amountPaid - plan.planPrice);
     if (priceDifference > 0.01) {
-      return sendError(res, 400, "Amount paid does not match plan price", {
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Amount paid does not match plan price", {
         expectedAmount: plan.planPrice,
         providedAmount: amountPaid,
       });
@@ -61,7 +69,7 @@ export const createSubscription = async (req, res) => {
     // Check if customer already has an active subscription for this plan type
     const existingActiveSubscription = await Subscription.findOne({
       customerId: customer._id,
-      status: "ACTIVE",
+      status: SUBSCRIPTION_STATUS.ACTIVE,
       isDeleted: false,
       expiryDate: { $gt: new Date() },
     }).populate("planId");
@@ -71,7 +79,7 @@ export const createSubscription = async (req, res) => {
       if (existingActiveSubscription.planId.planType === plan.planType) {
         return sendError(
           res,
-          409,
+          HTTP_STATUS.CONFLICT,
           `You already have an active ${plan.planType} subscription`,
           {
             existingSubscription: existingActiveSubscription,
@@ -83,7 +91,12 @@ export const createSubscription = async (req, res) => {
     // Calculate expiry date
     const purchaseDate = new Date();
     const expiryDate = new Date(purchaseDate);
-    expiryDate.setDate(expiryDate.getDate() + plan.days);
+    const daysCount = parseInt(plan.days); // Parse "7D" -> 7, "30D" -> 30
+    expiryDate.setDate(expiryDate.getDate() + daysCount);
+
+    // Calculate voucher expiry (3 months from purchase date as per requirements)
+    const voucherExpiryDate = new Date(purchaseDate);
+    voucherExpiryDate.setMonth(voucherExpiryDate.getMonth() + 3);
 
     // Create new subscription
     const subscription = new Subscription({
@@ -94,19 +107,47 @@ export const createSubscription = async (req, res) => {
       totalVouchers: plan.totalVouchers,
       usedVouchers: 0,
       amountPaid,
-      status: "ACTIVE",
+      status: SUBSCRIPTION_STATUS.ACTIVE,
     });
 
     await subscription.save();
+
+    // Determine meal type based on plan type
+    let mealType = "BOTH";
+    if (plan.planType === "LUNCH_ONLY") {
+      mealType = "LUNCH";
+    } else if (plan.planType === "DINNER_ONLY") {
+      mealType = "DINNER";
+    }
+
+    // Create ONE voucher record for this subscription with voucher count
+    const voucher = new Voucher({
+      subscriptionId: subscription._id,
+      customerId: customer._id,
+      mealType,
+      issuedDate: purchaseDate,
+      expiryDate: voucherExpiryDate,
+      totalVouchers: plan.totalVouchers,
+      remainingVouchers: plan.totalVouchers,
+      isExpired: false,
+    });
+
+    await voucher.save();
+
+    // Update customer's active subscription status
+    await updateCustomerSubscriptionStatus(customer._id);
 
     // Populate plan and customer details
     await subscription.populate("planId customerId");
 
     return sendSuccess(
       res,
-      201,
+      HTTP_STATUS.CREATED,
       "Subscription purchased successfully",
-      subscription
+      {
+        subscription,
+        voucher,
+      }
     );
   } catch (error) {
     console.error("Error creating subscription:", error);
@@ -114,16 +155,25 @@ export const createSubscription = async (req, res) => {
     // Handle validation errors
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => err.message);
-      return sendError(res, 400, "Validation failed", { errors });
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Validation failed", { errors });
     }
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid ID format");
+    }
+
+    // Handle duplicate active subscription (race condition)
+    if (error.code === 11000 && error.keyPattern?.customerId && error.keyPattern?.status) {
+      return sendError(
+        res,
+        409,
+        "You already have an active subscription. Please wait for the current subscription to expire or cancel it before purchasing a new one."
+      );
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to create subscription. Please try again"
     );
   }
@@ -140,14 +190,14 @@ export const getMySubscriptions = async (req, res) => {
     const { status, includeDeleted = "false", sortBy = "purchaseDate", sortOrder = "desc" } = req.query;
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Build filter
@@ -186,7 +236,7 @@ export const getMySubscriptions = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscriptions retrieved successfully",
       subscriptionsWithDetails
     );
@@ -194,7 +244,7 @@ export const getMySubscriptions = async (req, res) => {
     console.error("Error fetching customer subscriptions:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch subscriptions. Please try again"
     );
   }
@@ -210,20 +260,20 @@ export const getMyActiveSubscriptions = async (req, res) => {
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Fetch active subscriptions
     const subscriptions = await Subscription.find({
       customerId: customer._id,
-      status: "ACTIVE",
+      status: SUBSCRIPTION_STATUS.ACTIVE,
       isDeleted: false,
       expiryDate: { $gt: new Date() },
     })
@@ -243,7 +293,7 @@ export const getMyActiveSubscriptions = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Active subscriptions retrieved successfully",
       activeSubscriptions
     );
@@ -251,7 +301,7 @@ export const getMyActiveSubscriptions = async (req, res) => {
     console.error("Error fetching active subscriptions:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch active subscriptions. Please try again"
     );
   }
@@ -267,18 +317,18 @@ export const getMySubscriptionById = async (req, res) => {
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!id) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Find subscription
@@ -288,7 +338,7 @@ export const getMySubscriptionById = async (req, res) => {
     }).populate("planId");
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     // Calculate details
@@ -305,7 +355,7 @@ export const getMySubscriptionById = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscription retrieved successfully",
       subscriptionDetails
     );
@@ -313,12 +363,12 @@ export const getMySubscriptionById = async (req, res) => {
     console.error("Error fetching subscription:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch subscription. Please try again"
     );
   }
@@ -335,18 +385,18 @@ export const cancelMySubscription = async (req, res) => {
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!id) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Find subscription
@@ -356,32 +406,35 @@ export const cancelMySubscription = async (req, res) => {
     });
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     // Check if already cancelled
-    if (subscription.status === "CANCELLED") {
-      return sendError(res, 400, "Subscription is already cancelled");
+    if (subscription.status === SUBSCRIPTION_STATUS.CANCELLED) {
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription is already cancelled");
     }
 
     // Check if already expired or exhausted
-    if (subscription.status === "EXPIRED") {
-      return sendError(res, 400, "Cannot cancel an expired subscription");
+    if (subscription.status === SUBSCRIPTION_STATUS.EXPIRED) {
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Cannot cancel an expired subscription");
     }
 
-    if (subscription.status === "EXHAUSTED") {
-      return sendError(res, 400, "Cannot cancel an exhausted subscription");
+    if (subscription.status === SUBSCRIPTION_STATUS.EXHAUSTED) {
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Cannot cancel an exhausted subscription");
     }
 
     // Cancel subscription
-    subscription.status = "CANCELLED";
+    subscription.status = SUBSCRIPTION_STATUS.CANCELLED;
     await subscription.save();
+
+    // Update customer's active subscription status
+    await updateCustomerSubscriptionStatus(customer._id);
 
     await subscription.populate("planId");
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscription cancelled successfully",
       subscription
     );
@@ -389,12 +442,12 @@ export const cancelMySubscription = async (req, res) => {
     console.error("Error cancelling subscription:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to cancel subscription. Please try again"
     );
   }
@@ -411,18 +464,18 @@ export const useVoucher = async (req, res) => {
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!subscriptionId) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Find subscription
@@ -433,32 +486,32 @@ export const useVoucher = async (req, res) => {
     });
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     // Check if subscription is active
-    if (subscription.status !== "ACTIVE") {
+    if (subscription.status !== SUBSCRIPTION_STATUS.ACTIVE) {
       return sendError(
         res,
-        400,
+        HTTP_STATUS.BAD_REQUEST,
         `Cannot use voucher: Subscription is ${subscription.status.toLowerCase()}`
       );
     }
 
     // Check if subscription has expired
     if (new Date() > subscription.expiryDate) {
-      subscription.status = "EXPIRED";
+      subscription.status = SUBSCRIPTION_STATUS.EXPIRED;
       await subscription.save();
-      return sendError(res, 400, "Subscription has expired");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription has expired");
     }
 
     // Check if vouchers are available
     const remainingVouchers = subscription.totalVouchers - subscription.usedVouchers;
 
     if (remainingVouchers <= 0) {
-      subscription.status = "EXHAUSTED";
+      subscription.status = SUBSCRIPTION_STATUS.EXHAUSTED;
       await subscription.save();
-      return sendError(res, 400, "No vouchers remaining in this subscription");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "No vouchers remaining in this subscription");
     }
 
     // Use voucher
@@ -466,7 +519,7 @@ export const useVoucher = async (req, res) => {
 
     // Check if this was the last voucher
     if (subscription.usedVouchers >= subscription.totalVouchers) {
-      subscription.status = "EXHAUSTED";
+      subscription.status = SUBSCRIPTION_STATUS.EXHAUSTED;
     }
 
     await subscription.save();
@@ -483,7 +536,7 @@ export const useVoucher = async (req, res) => {
     console.error("Error using voucher:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     return sendError(res, 500, "Failed to use voucher. Please try again");
@@ -501,20 +554,20 @@ export const checkActiveSubscription = async (req, res) => {
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Build filter
     const filter = {
       customerId: customer._id,
-      status: "ACTIVE",
+      status: SUBSCRIPTION_STATUS.ACTIVE,
       isDeleted: false,
       expiryDate: { $gt: new Date() },
     };
@@ -528,7 +581,7 @@ export const checkActiveSubscription = async (req, res) => {
     if (planType) {
       const upperPlanType = planType.toUpperCase();
       relevantSubscriptions = subscriptions.filter(
-        (sub) => sub.planId.planType === upperPlanType || sub.planId.planType === "BOTH"
+        (sub) => sub.planId.planType === upperPlanType || sub.planId.planType === PLAN_TYPES.BOTH
       );
     }
 
@@ -550,7 +603,7 @@ export const checkActiveSubscription = async (req, res) => {
     console.error("Error checking subscription:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to check subscription. Please try again"
     );
   }
@@ -570,8 +623,8 @@ export const getAllSubscriptions = async (req, res) => {
       includeDeleted = "false",
       sortBy = "purchaseDate",
       sortOrder = "desc",
-      page = 1,
-      limit = 20,
+      page = PAGINATION.DEFAULT_PAGE,
+      limit = PAGINATION.DEFAULT_LIMIT,
     } = req.query;
 
     // Build filter
@@ -639,7 +692,7 @@ export const getAllSubscriptions = async (req, res) => {
     console.error("Error fetching subscriptions:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch subscriptions. Please try again"
     );
   }
@@ -654,7 +707,7 @@ export const getSubscriptionById = async (req, res) => {
     const { id } = req.params;
 
     if (!id) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     const subscription = await Subscription.findById(id).populate(
@@ -662,7 +715,7 @@ export const getSubscriptionById = async (req, res) => {
     );
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     // Calculate details
@@ -679,7 +732,7 @@ export const getSubscriptionById = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscription retrieved successfully",
       subscriptionDetails
     );
@@ -687,12 +740,12 @@ export const getSubscriptionById = async (req, res) => {
     console.error("Error fetching subscription:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch subscription. Please try again"
     );
   }
@@ -709,16 +762,16 @@ export const updateSubscriptionStatus = async (req, res) => {
     const { status } = req.body;
 
     if (!id) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     if (!status) {
-      return sendError(res, 400, "Status is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Status is required");
     }
 
     const validStatuses = ["ACTIVE", "EXPIRED", "CANCELLED", "EXHAUSTED"];
     if (!validStatuses.includes(status.toUpperCase())) {
-      return sendError(res, 400, "Invalid status value", {
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid status value", {
         validStatuses,
       });
     }
@@ -726,7 +779,7 @@ export const updateSubscriptionStatus = async (req, res) => {
     const subscription = await Subscription.findById(id);
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     // Update status
@@ -737,7 +790,7 @@ export const updateSubscriptionStatus = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscription status updated successfully",
       subscription
     );
@@ -745,17 +798,17 @@ export const updateSubscriptionStatus = async (req, res) => {
     console.error("Error updating subscription status:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => err.message);
-      return sendError(res, 400, "Validation failed", { errors });
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Validation failed", { errors });
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to update subscription. Please try again"
     );
   }
@@ -770,13 +823,13 @@ export const deleteSubscription = async (req, res) => {
     const { id } = req.params;
 
     if (!id) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     const subscription = await Subscription.findById(id);
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     // Soft delete
@@ -788,7 +841,7 @@ export const deleteSubscription = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscription deleted successfully",
       subscription
     );
@@ -796,12 +849,12 @@ export const deleteSubscription = async (req, res) => {
     console.error("Error deleting subscription:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to delete subscription. Please try again"
     );
   }
@@ -816,17 +869,17 @@ export const restoreSubscription = async (req, res) => {
     const { id } = req.params;
 
     if (!id) {
-      return sendError(res, 400, "Subscription ID is required");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription ID is required");
     }
 
     const subscription = await Subscription.findById(id);
 
     if (!subscription) {
-      return sendError(res, 404, "Subscription not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.SUBSCRIPTION_NOT_FOUND);
     }
 
     if (!subscription.isDeleted) {
-      return sendError(res, 400, "Subscription is not deleted");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Subscription is not deleted");
     }
 
     // Restore
@@ -838,7 +891,7 @@ export const restoreSubscription = async (req, res) => {
 
     return sendSuccess(
       res,
-      200,
+      HTTP_STATUS.OK,
       "Subscription restored successfully",
       subscription
     );
@@ -846,12 +899,12 @@ export const restoreSubscription = async (req, res) => {
     console.error("Error restoring subscription:", error);
 
     if (error.name === "CastError") {
-      return sendError(res, 400, "Invalid subscription ID format");
+      return sendError(res, HTTP_STATUS.BAD_REQUEST, "Invalid subscription ID format");
     }
 
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to restore subscription. Please try again"
     );
   }
@@ -875,7 +928,7 @@ export const getSubscriptionStats = async (_req, res) => {
     ] = await Promise.all([
       Subscription.countDocuments({ isDeleted: false }),
       Subscription.countDocuments({
-        status: "ACTIVE",
+        status: SUBSCRIPTION_STATUS.ACTIVE,
         isDeleted: false,
         expiryDate: { $gt: new Date() },
       }),
@@ -945,7 +998,7 @@ export const getSubscriptionStats = async (_req, res) => {
     console.error("Error fetching subscription statistics:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch subscription statistics. Please try again"
     );
   }
@@ -960,7 +1013,7 @@ export const updateExpiredSubscriptions = async (_req, res) => {
   try {
     const result = await Subscription.updateMany(
       {
-        status: "ACTIVE",
+        status: SUBSCRIPTION_STATUS.ACTIVE,
         expiryDate: { $lte: new Date() },
         isDeleted: false,
       },
@@ -976,7 +1029,7 @@ export const updateExpiredSubscriptions = async (_req, res) => {
     console.error("Error updating expired subscriptions:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to update expired subscriptions. Please try again"
     );
   }
@@ -992,14 +1045,14 @@ export const getMySubscriptionSummary = async (req, res) => {
     const firebaseUid = req.firebaseUser?.uid;
 
     if (!firebaseUid) {
-      return sendError(res, 401, "Authentication required");
+      return sendError(res, HTTP_STATUS.UNAUTHORIZED, ERROR_MESSAGES.AUTHENTICATION_REQUIRED);
     }
 
     // Find customer
     const customer = await Customer.findOne({ firebaseUid, isDeleted: false });
 
     if (!customer) {
-      return sendError(res, 404, "Customer not found");
+      return sendError(res, HTTP_STATUS.NOT_FOUND, ERROR_MESSAGES.CUSTOMER_NOT_FOUND);
     }
 
     // Get subscription counts
@@ -1016,7 +1069,7 @@ export const getMySubscriptionSummary = async (req, res) => {
       }),
       Subscription.countDocuments({
         customerId: customer._id,
-        status: "ACTIVE",
+        status: SUBSCRIPTION_STATUS.ACTIVE,
         isDeleted: false,
         expiryDate: { $gt: new Date() },
       }),
@@ -1052,8 +1105,45 @@ export const getMySubscriptionSummary = async (req, res) => {
     console.error("Error fetching subscription summary:", error);
     return sendError(
       res,
-      500,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
       "Failed to fetch subscription summary. Please try again"
     );
+  }
+};
+
+/**
+ * Utility function to update customer's active subscription status
+ * @description Updates the customer's activeSubscription field based on current subscriptions
+ * @param {string} customerId - The customer's MongoDB ObjectId
+ * @returns {Promise<void>}
+ */
+export const updateCustomerSubscriptionStatus = async (customerId) => {
+  try {
+    // Find any active subscription with available vouchers
+    const activeSubscription = await Subscription.findOne({
+      customerId,
+      status: SUBSCRIPTION_STATUS.ACTIVE,
+      isDeleted: false,
+      expiryDate: { $gt: new Date() },
+      $expr: { $lt: ["$usedVouchers", "$totalVouchers"] },
+    }).sort({ expiryDate: 1 }); // Get the one expiring soonest
+
+    // Update customer
+    await Customer.findByIdAndUpdate(customerId, {
+      "activeSubscription.status": !!activeSubscription,
+      "activeSubscription.subscriptionId": activeSubscription?._id || null,
+    });
+
+    console.log(
+      `Updated customer ${customerId} subscription status: ${
+        activeSubscription ? "ACTIVE" : "INACTIVE"
+      }`
+    );
+  } catch (error) {
+    console.error(
+      `Error updating customer subscription status for ${customerId}:`,
+      error
+    );
+    // Don't throw - this is a background update that shouldn't break the main flow
   }
 };

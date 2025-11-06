@@ -6,6 +6,7 @@ const { Schema } = mongoose;
 const ADMIN_ROLES = {
   ADMIN: "ADMIN",
   KITCHEN_STAFF: "KITCHEN_STAFF",
+  DELIVERY_DRIVER: "DELIVERY_DRIVER",
 };
 
 const adminSchema = new Schema(

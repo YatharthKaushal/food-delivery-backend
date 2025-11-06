@@ -1,33 +1,32 @@
 import express from "express";
 import {
-  getIsProfileComplete,
+  registerDriver,
+  loginDriver,
   onBoardingUser,
-  createTestDriver,
 } from "./driver.auth.controller.js";
-import { verifyFirebaseToken } from "../middleware/firebaseToken.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
 /**
- * @route   GET /api/auth/delivery-driver/status
- * @desc    Get delivery driver profile completion status
- * @access  Protected (requires Firebase token)
+ * @route   POST /api/auth/delivery-driver/register
+ * @desc    Register a new delivery driver
+ * @access  Public
  */
-router.get("/status", verifyFirebaseToken, getIsProfileComplete);
+router.post("/register", registerDriver);
 
 /**
- * @route   POST /api/auth/delivery-driver/onboarding
+ * @route   POST /api/auth/delivery-driver/login
+ * @desc    Login delivery driver and get JWT token
+ * @access  Public
+ */
+router.post("/login", loginDriver);
+
+/**
+ * @route   PUT /api/auth/delivery-driver/onboarding
  * @desc    Complete delivery driver onboarding
- * @access  Protected (requires Firebase token)
+ * @access  Protected (requires JWT token)
  */
-router.post("/onboarding", verifyFirebaseToken, onBoardingUser);
-
-/**
- * @route   POST /api/auth/delivery-driver/create-test
- * @desc    Create a test delivery driver (non-production only)
- * @access  Protected (requires admin JWT token)
- */
-router.post("/create-test", authenticate, createTestDriver);
+router.put("/onboarding", authenticate, onBoardingUser);
 
 export default router;

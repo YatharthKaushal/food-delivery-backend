@@ -5,9 +5,13 @@ import customerAuthRoutes from "./Auth/customer.auth.route.js";
 import driverAuthRoutes from "./Auth/driver.auth.route.js";
 import menuItemRoutes from "./MenuItem/menuItem.route.js";
 import addonRoutes from "./MenuItem/addon.route.js";
-import subscriptionPlanRoutes from "./Subpscription/subscriptionplan.route.js";
-import subscriptionRoutes from "./Subpscription/subscription.route.js";
-import voucherRoutes from "./Subpscription/voucher.route.js";
+import subscriptionPlanRoutes from "./Subscription/subscriptionplan.route.js";
+import subscriptionRoutes from "./Subscription/subscription.route.js";
+import voucherRoutes from "./Subscription/voucher.route.js";
+import orderRoutes from "./Order/order.route.js";
+import deliveryRoutes from "./Order/delivery.route.js";
+import driverRoutes from "./Driver/driver.route.js";
+import adminRoutes from "./Admin/admin.route.js";
 
 const router = express.Router();
 
@@ -44,6 +48,22 @@ router.use("/subscriptions", subscriptionRoutes);
 // Voucher routes
 // prefix: /api (example, /api/vouchers)
 router.use("/vouchers", voucherRoutes);
+
+// Order routes
+// prefix: /api (example, /api/orders)
+router.use("/orders", orderRoutes);
+
+// Delivery routes
+// prefix: /api (example, /api/deliveries)
+router.use("/deliveries", deliveryRoutes);
+
+// Driver routes
+// prefix: /api (example, /api/driver)
+router.use("/driver", driverRoutes);
+
+// Admin routes
+// prefix: /api (example, /api/admin/dashboard)
+router.use("/admin", adminRoutes);
 
 // Add other routes here as needed
 

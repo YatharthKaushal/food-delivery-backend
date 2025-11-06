@@ -10,19 +10,43 @@ const deliveryDriverSchema = new mongoose.Schema(
       maxlength: [100, "Name cannot exceed 100 characters"],
     },
 
-    phone: {
+    username: {
       type: String,
-      required: [true, "Phone number is required"],
+      required: [true, "Username is required"],
       unique: true,
-      sparse: true,
       trim: true,
+      lowercase: true,
+      minlength: [3, "Username must be at least 3 characters long"],
+      maxlength: [30, "Username cannot exceed 30 characters"],
+      validate: {
+        validator: function (v) {
+          // Only alphanumeric characters and underscores, no spaces or special characters
+          return /^[a-z0-9_]+$/.test(v);
+        },
+        message:
+          "Username can only contain lowercase letters, numbers, and underscores (no spaces or special characters)",
+      },
+      index: true,
     },
 
-    firebaseUid: {
+    password: {
       type: String,
-      unique: true,
-      sparse: true,
+      required: [true, "Password is required"],
+      minlength: [8, "Password must be at least 8 characters long"],
+      select: false, // Don't include password by default in queries
+    },
+
+    phone: {
+      type: String,
       trim: true,
+      sparse: true,
+    },
+
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      sparse: true,
       index: true,
     },
 
@@ -61,6 +85,22 @@ const deliveryDriverSchema = new mongoose.Schema(
       },
       default: "OFFLINE",
       uppercase: true,
+    },
+
+    isAvailable: {
+      type: Boolean,
+      default: true,
+    },
+
+    currentOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      default: null,
+    },
+
+    lastDeliveryAt: {
+      type: Date,
+      default: null,
     },
 
     currentLocation: {
@@ -105,11 +145,6 @@ const deliveryDriverSchema = new mongoose.Schema(
       },
     },
 
-    isProfileComplete: {
-      type: Boolean,
-      default: false,
-    },
-
     isDeleted: {
       type: Boolean,
       default: false,
@@ -127,6 +162,8 @@ const deliveryDriverSchema = new mongoose.Schema(
 );
 
 // Unique field indexes (sparse)
+deliveryDriverSchema.index({ username: 1, isDeleted: 1 });
+deliveryDriverSchema.index({ email: 1, isDeleted: 1 });
 deliveryDriverSchema.index({ phone: 1 }, { unique: true, sparse: true });
 deliveryDriverSchema.index(
   { "govId.idNumber": 1 },

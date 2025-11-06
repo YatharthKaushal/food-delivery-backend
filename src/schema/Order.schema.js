@@ -137,10 +137,20 @@ const orderSchema = new Schema(
       type: [addonItemSchema],
       default: [],
     },
-    voucherApplied: {
+    subscriptionUsed: {
       type: Schema.Types.ObjectId,
-      ref: "Voucher",
+      ref: "Subscription",
       default: null,
+      index: true,
+    },
+    vouchersConsumed: {
+      type: Number,
+      default: 0,
+      min: [0, "Vouchers consumed cannot be negative"],
+      validate: {
+        validator: Number.isInteger,
+        message: "Vouchers consumed must be a whole number",
+      },
     },
     orderStatus: {
       type: orderStatusSchema,
@@ -173,6 +183,53 @@ const orderSchema = new Schema(
           "{VALUE} is not a valid packaging type. Must be either 'STEEL_DABBA' or 'DISPOSABLE'",
       },
       uppercase: true,
+    },
+    driverId: {
+      type: Schema.Types.ObjectId,
+      ref: "DeliveryDriver",
+      default: null,
+      index: true,
+    },
+    assignedAt: {
+      type: Date,
+      default: null,
+    },
+    pickedUpAt: {
+      type: Date,
+      default: null,
+    },
+    refundStatus: {
+      type: String,
+      enum: ["none", "pending", "processed", "rejected"],
+      default: "none",
+    },
+    refundAmount: {
+      type: Number,
+      default: 0,
+      min: [0, "Refund amount cannot be negative"],
+    },
+    refundReason: {
+      type: String,
+      trim: true,
+      maxlength: [500, "Refund reason cannot exceed 500 characters"],
+    },
+    refundRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    refundProcessedAt: {
+      type: Date,
+      default: null,
+    },
+    refundProcessedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
+    adminNotes: {
+      type: String,
+      trim: true,
+      maxlength: [500, "Admin notes cannot exceed 500 characters"],
     },
     isDeleted: {
       type: Boolean,
@@ -216,6 +273,9 @@ orderSchema.index({ "orderStatus.cancelledAt": 1 });
 
 // Auto-order tracking
 orderSchema.index({ isAutoOrder: 1, scheduledForDate: -1 });
+
+// Subscription tracking
+orderSchema.index({ subscriptionUsed: 1, scheduledForDate: -1 });
 
 // Soft delete
 orderSchema.index({ isDeleted: 1, deletedAt: 1 });

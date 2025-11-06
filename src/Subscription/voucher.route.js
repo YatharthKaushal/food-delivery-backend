@@ -1,6 +1,5 @@
 import express from "express";
 import {
-  generateVouchersForSubscription,
   getMyVouchers,
   getMyAvailableVouchers,
   getMyVoucherById,
@@ -52,13 +51,14 @@ router.get("/", authenticate, authorize("ADMIN"), getAllVouchers);
 // GET /api/vouchers/stats - Get voucher statistics
 router.get("/stats", authenticate, authorize("ADMIN"), getVoucherStats);
 
-// POST /api/vouchers/generate - Generate vouchers for a subscription
-router.post(
-  "/generate",
-  authenticate,
-  authorize("ADMIN"),
-  generateVouchersForSubscription
-);
+// POST /api/vouchers/generate - DEPRECATED: No longer used (Phase 1 refactor)
+// Voucher tracking is now done via Subscription table's totalVouchers and usedVouchers fields
+// router.post(
+//   "/generate",
+//   authenticate,
+//   authorize("ADMIN"),
+//   generateVouchersForSubscription
+// );
 
 // POST /api/vouchers/update-expired - Update expired vouchers
 router.post(

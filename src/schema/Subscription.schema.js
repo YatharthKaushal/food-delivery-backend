@@ -121,6 +121,8 @@ const subscriptionSchema = new Schema(
 // Customer queries
 subscriptionSchema.index({ customerId: 1, status: 1, purchaseDate: -1 });
 subscriptionSchema.index({ customerId: 1, isDeleted: 1 });
+subscriptionSchema.index({ customerId: 1, status: 1, expiryDate: 1 }); // Phase 4: For finding active subscriptions
+subscriptionSchema.index({ customerId: 1, expiryDate: 1, isDeleted: 1 }); // Phase 4: For expiry tracking
 
 // Plan analytics
 subscriptionSchema.index({ planId: 1, status: 1, purchaseDate: -1 });
@@ -131,6 +133,18 @@ subscriptionSchema.index({ status: 1, expiryDate: 1 });
 
 // Soft delete
 subscriptionSchema.index({ isDeleted: 1, deletedAt: 1 });
+
+// Phase 4: Prevent race condition - ensure only one active subscription per customer
+subscriptionSchema.index(
+  { customerId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: 'ACTIVE',
+      isDeleted: false
+    }
+  }
+);
 
 const Subscription = mongoose.model("Subscription", subscriptionSchema);
 
