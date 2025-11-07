@@ -108,7 +108,6 @@ const customerSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
       required: true,
-      index: true,
     },
     deletedAt: {
       type: Date,
@@ -133,7 +132,6 @@ const customerSchema = new mongoose.Schema(
 );
 
 // Single field indexes
-customerSchema.index({ email: 1 }, { sparse: true });
 customerSchema.index({ phone: 1 }, { sparse: true });
 customerSchema.index({ isDeleted: 1 });
 

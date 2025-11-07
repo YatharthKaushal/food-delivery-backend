@@ -47,7 +47,6 @@ const deliveryDriverSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
       sparse: true,
-      index: true,
     },
 
     govId: {
@@ -165,14 +164,6 @@ const deliveryDriverSchema = new mongoose.Schema(
 deliveryDriverSchema.index({ username: 1, isDeleted: 1 });
 deliveryDriverSchema.index({ email: 1, isDeleted: 1 });
 deliveryDriverSchema.index({ phone: 1 }, { unique: true, sparse: true });
-deliveryDriverSchema.index(
-  { "govId.idNumber": 1 },
-  { unique: true, sparse: true }
-);
-deliveryDriverSchema.index(
-  { "vehicle.vehicleNumber": 1 },
-  { unique: true, sparse: true }
-);
 
 // Availability and performance
 deliveryDriverSchema.index({ isActive: 1, availabilityStatus: 1, rating: -1 });

@@ -257,7 +257,6 @@ const deliverySchema = new Schema(
 );
 
 // Order and customer lookups
-deliverySchema.index({ orderId: 1 }, { unique: true, sparse: true });
 deliverySchema.index({ customerId: 1, createdAt: -1 });
 
 // Driver queries
