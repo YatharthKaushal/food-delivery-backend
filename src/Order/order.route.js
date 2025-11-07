@@ -39,47 +39,6 @@ import { attachCustomer } from "../middleware/attachCustomer.middleware.js";
 const router = express.Router();
 
 /**
- * Customer Routes (Firebase Authentication Required)
- * These routes are accessible to authenticated customers
- */
-
-/**
- * @route   POST /api/orders
- * @desc    Create a new order
- * @access  Customer (Firebase authenticated)
- */
-router.post("/", verifyFirebaseToken, attachCustomer, createOrder);
-
-/**
- * @route   GET /api/orders/my-orders
- * @desc    Get customer's own orders with filtering and pagination
- * @access  Customer (Firebase authenticated)
- * @query   mealType - Filter by LUNCH or DINNER
- * @query   scheduledForDate - Filter by scheduled date
- * @query   status - Filter by order status (active, delivered, cancelled)
- * @query   includeDeleted - Include deleted orders (default: false)
- * @query   sortBy - Sort field (default: scheduledForDate)
- * @query   sortOrder - Sort order: asc/desc (default: desc)
- * @query   page - Page number (default: 1)
- * @query   limit - Items per page (default: 20, max: 100)
- */
-router.get("/my-orders", verifyFirebaseToken, attachCustomer, getMyOrders);
-
-/**
- * @route   GET /api/orders/:id
- * @desc    Get customer's own order by ID
- * @access  Customer (Firebase authenticated)
- */
-router.get("/:id", verifyFirebaseToken, attachCustomer, getMyOrderById);
-
-/**
- * @route   PATCH /api/orders/:id/cancel
- * @desc    Cancel customer's own order
- * @access  Customer (Firebase authenticated)
- */
-router.patch("/:id/cancel", verifyFirebaseToken, attachCustomer, cancelMyOrder);
-
-/**
  * Kitchen Staff Routes (JWT Authentication Required)
  * These routes are accessible to kitchen staff and admins
  */
@@ -331,14 +290,6 @@ router.post(
  */
 
 /**
- * @route   POST /api/orders/:orderId/refund
- * @desc    Customer requests refund for an order
- * @access  Customer (Firebase authenticated)
- * @body    reason - Reason for refund request (optional)
- */
-router.post("/:orderId/refund", verifyFirebaseToken, attachCustomer, requestRefund);
-
-/**
  * @route   GET /api/orders/refunds
  * @desc    Get all refund requests (filtered by status)
  * @access  Admin only
@@ -364,5 +315,56 @@ router.post(
   authorize("ADMIN"),
   processRefund
 );
+
+/**
+ * @route   POST /api/orders/:orderId/refund
+ * @desc    Customer requests refund for an order
+ * @access  Customer (Firebase authenticated)
+ * @body    reason - Reason for refund request (optional)
+ */
+router.post("/:orderId/refund", verifyFirebaseToken, attachCustomer, requestRefund);
+
+/**
+ * Customer Routes (Firebase Authentication Required)
+ * These routes are accessible to authenticated customers
+ * IMPORTANT: These must come after all specific routes to avoid route conflicts
+ */
+
+/**
+ * @route   GET /api/orders/my-orders
+ * @desc    Get customer's own orders with filtering and pagination
+ * @access  Customer (Firebase authenticated)
+ * @query   mealType - Filter by LUNCH or DINNER
+ * @query   scheduledForDate - Filter by scheduled date
+ * @query   status - Filter by order status (active, delivered, cancelled)
+ * @query   includeDeleted - Include deleted orders (default: false)
+ * @query   sortBy - Sort field (default: scheduledForDate)
+ * @query   sortOrder - Sort order: asc/desc (default: desc)
+ * @query   page - Page number (default: 1)
+ * @query   limit - Items per page (default: 20, max: 100)
+ */
+router.get("/my-orders", verifyFirebaseToken, attachCustomer, getMyOrders);
+
+/**
+ * @route   POST /api/orders
+ * @desc    Create a new order
+ * @access  Customer (Firebase authenticated)
+ */
+router.post("/", verifyFirebaseToken, attachCustomer, createOrder);
+
+/**
+ * @route   PATCH /api/orders/:id/cancel
+ * @desc    Cancel customer's own order
+ * @access  Customer (Firebase authenticated)
+ */
+router.patch("/:id/cancel", verifyFirebaseToken, attachCustomer, cancelMyOrder);
+
+/**
+ * @route   GET /api/orders/:id
+ * @desc    Get customer's own order by ID
+ * @access  Customer (Firebase authenticated)
+ * IMPORTANT: This must be the LAST route to avoid catching specific routes
+ */
+router.get("/:id", verifyFirebaseToken, attachCustomer, getMyOrderById);
 
 export default router;
