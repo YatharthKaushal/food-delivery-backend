@@ -9,11 +9,20 @@ import { firebaseAdmin } from "../config/firebase.config.js";
  */
 export const getIsProfileComplete = async (req, res) => {
   try {
+    console.log("\n=== getIsProfileComplete START ===");
+
     // Extract Firebase user data from middleware
+    console.log("> Step 1: Extracting Firebase user data from req.firebaseUser");
+    console.log("> req.firebaseUser exists:", !!req.firebaseUser);
+    console.log("> Full firebaseUser object:", JSON.stringify(req.firebaseUser, null, 2));
+
     const { uid, phoneNumber } = req.firebaseUser;
+    console.log("> Extracted UID:", uid);
+    console.log("> Extracted Phone:", phoneNumber);
 
     // Validate that we have either uid or phone number
     if (!uid && !phoneNumber) {
+      console.log("> ERROR: No user identification found");
       return sendError(res, 400, "User identification not found in token", {
         error: "MISSING_USER_IDENTIFICATION",
       });
@@ -30,19 +39,36 @@ export const getIsProfileComplete = async (req, res) => {
       query.phone = phoneNumber;
     }
 
+    console.log("> Step 2: Built query:", JSON.stringify(query, null, 2));
+
     // Check if customer profile exists
+    console.log("> Step 3: Searching for customer in database...");
     let customer = await Customer.findOne(query);
+    console.log("> Customer found:", customer ? "YES" : "NO");
+    if (customer) {
+      console.log("> Existing customer ID:", customer._id);
+      console.log("> Existing customer data:", JSON.stringify({
+        _id: customer._id,
+        name: customer.name,
+        phone: customer.phone,
+        firebaseUid: customer.firebaseUid,
+        isProfileComplete: customer.isProfileComplete
+      }, null, 2));
+    }
 
     // If customer doesn't exist, create a new record
     if (!customer) {
-      try {
-        customer = await Customer.create({
-          phone: phoneNumber || null,
-          firebaseUid: uid,
-          isProfileComplete: false,
-        });
+      console.log("> Step 4: Customer not found, creating new customer...");
+      const newCustomerData = {
+        phone: phoneNumber || null,
+        firebaseUid: uid,
+        isProfileComplete: false,
+      };
+      console.log("> New customer data:", JSON.stringify(newCustomerData, null, 2));
 
-        console.log(`> New customer record created for UID: ${uid}`);
+      try {
+        customer = await Customer.create(newCustomerData);
+        console.log("> SUCCESS: New customer created with ID:", customer._id);
 
         return sendSuccess(res, 201, "Customer profile created successfully", {
           isProfileComplete: false,
@@ -50,8 +76,15 @@ export const getIsProfileComplete = async (req, res) => {
           isNewUser: true,
         });
       } catch (createError) {
+        console.log("> ERROR during customer creation:");
+        console.log("> Error code:", createError.code);
+        console.log("> Error name:", createError.name);
+        console.log("> Error message:", createError.message);
+        console.log("> Full error:", JSON.stringify(createError, null, 2));
+
         // Handle duplicate key errors
         if (createError.code === 11000) {
+          console.log("> Duplicate key error detected");
           return sendError(
             res,
             409,
@@ -61,26 +94,39 @@ export const getIsProfileComplete = async (req, res) => {
             }
           );
         }
+
+        console.log("> Rethrowing error to outer catch block");
         throw createError;
       }
     }
 
     // Return existing customer's profile completion status
-    return sendSuccess(res, 200, "Profile status retrieved successfully", {
+    console.log("> Step 5: Returning existing customer's profile status");
+    const responseData = {
       isProfileComplete: customer.isProfileComplete,
       customerId: customer._id,
       isNewUser: false,
       hasName: !!customer.name,
       hasDietaryPreferences: !!customer.dietaryPreferences?.foodType,
-    });
+    };
+    console.log("> Response data:", JSON.stringify(responseData, null, 2));
+    console.log("=== getIsProfileComplete END (SUCCESS) ===\n");
+
+    return sendSuccess(res, 200, "Profile status retrieved successfully", responseData);
   } catch (error) {
-    console.error("Error in getIsProfileComplete:", error);
+    console.error("\n!!! ERROR in getIsProfileComplete !!!");
+    console.error("> Error name:", error.name);
+    console.error("> Error message:", error.message);
+    console.error("> Error stack:", error.stack);
+    console.error("> Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    console.error("=== getIsProfileComplete END (ERROR) ===\n");
+
     return sendError(
       res,
       500,
       "Failed to retrieve profile status",
       process.env.NODE_ENV === "development"
-        ? { error: error.message }
+        ? { error: error.message, stack: error.stack }
         : undefined
     );
   }

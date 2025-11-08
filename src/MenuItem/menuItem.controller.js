@@ -25,8 +25,8 @@ export const createMenuItem = async (req, res) => {
     }
 
     // Validate mealType enum
-    if (!["LUNCH", "DINNER"].includes(mealType.toUpperCase())) {
-      return sendError(res, 400, "Invalid mealType. Must be either LUNCH or DINNER");
+    if (!["LUNCH", "DINNER", "OTHER", "BOTH"].includes(mealType.toUpperCase())) {
+      return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
     }
 
     // Validate price
@@ -116,8 +116,8 @@ export const getAllMenuItems = async (req, res) => {
     // Filter by meal type
     if (mealType) {
       const upperMealType = mealType.toUpperCase();
-      if (!["LUNCH", "DINNER"].includes(upperMealType)) {
-        return sendError(res, 400, "Invalid mealType. Must be LUNCH or DINNER");
+      if (!["LUNCH", "DINNER", "OTHER", "BOTH"].includes(upperMealType)) {
+        return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
       }
       filter.mealType = upperMealType;
     }
@@ -260,8 +260,8 @@ export const updateMenuItem = async (req, res) => {
     }
 
     // Validate updates
-    if (updates.mealType && !["LUNCH", "DINNER"].includes(updates.mealType.toUpperCase())) {
-      return sendError(res, 400, "Invalid mealType. Must be LUNCH or DINNER");
+    if (updates.mealType && !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(updates.mealType.toUpperCase())) {
+      return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
     }
 
     if (updates.price !== undefined) {
@@ -498,8 +498,8 @@ export const bulkUpdateMenuItems = async (req, res) => {
     delete updates.deletedAt;
 
     // Validate updates
-    if (updates.mealType && !["LUNCH", "DINNER"].includes(updates.mealType.toUpperCase())) {
-      return sendError(res, 400, "Invalid mealType. Must be LUNCH or DINNER");
+    if (updates.mealType && !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(updates.mealType.toUpperCase())) {
+      return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
     }
 
     if (updates.price !== undefined && (typeof updates.price !== "number" || updates.price < 0)) {

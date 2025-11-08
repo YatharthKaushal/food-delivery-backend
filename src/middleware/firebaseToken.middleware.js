@@ -20,11 +20,18 @@ import { sendError } from "../utils/response.util.js";
  */
 export const verifyFirebaseToken = async (req, res, next) => {
   try {
+    console.log("\n=== Firebase Token Verification START ===");
+    console.log("> Request URL:", req.originalUrl);
+    console.log("> Request Method:", req.method);
+
     // Extract the token from Authorization header
     const authHeader = req.headers.authorization;
+    console.log("> Authorization Header exists:", !!authHeader);
+    console.log("> Authorization Header preview:", authHeader ? authHeader.substring(0, 20) + "..." : "N/A");
 
     // Check if Authorization header exists
     if (!authHeader) {
+      console.log("> ERROR: Authorization header is missing");
       return sendError(res, 401, "Authorization header is missing", {
         error: "MISSING_AUTH_HEADER",
       });
@@ -32,6 +39,7 @@ export const verifyFirebaseToken = async (req, res, next) => {
 
     // Check if Authorization header follows Bearer token format
     if (!authHeader.startsWith("Bearer ")) {
+      console.log("> ERROR: Invalid authorization format");
       return sendError(
         res,
         401,
@@ -44,19 +52,37 @@ export const verifyFirebaseToken = async (req, res, next) => {
 
     // Extract the token (remove "Bearer " prefix)
     const token = authHeader.substring(7);
+    console.log("> Token extracted, length:", token.length);
+    console.log("> Token preview:", token.substring(0, 30) + "...");
 
     // Check if token exists after "Bearer "
     if (!token || token.trim() === "") {
+      console.log("> ERROR: Token is empty");
       return sendError(res, 401, "Token is missing in authorization header", {
         error: "MISSING_TOKEN",
       });
     }
 
     // Verify the Firebase ID token
+    console.log("> Verifying token with Firebase Admin...");
     let decodedToken;
     try {
       decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
+      console.log("> Token verified successfully!");
+      console.log("> Decoded token UID:", decodedToken.uid);
+      console.log("> Decoded token phone_number:", decodedToken.phone_number);
+      console.log("> Full decoded token:", JSON.stringify({
+        uid: decodedToken.uid,
+        phone_number: decodedToken.phone_number,
+        email: decodedToken.email,
+        email_verified: decodedToken.email_verified,
+        name: decodedToken.name
+      }, null, 2));
     } catch (verifyError) {
+      console.log("> ERROR during token verification:");
+      console.log("> Error code:", verifyError.code);
+      console.log("> Error message:", verifyError.message);
+
       // Handle specific Firebase token verification errors
       if (verifyError.code === "auth/id-token-expired") {
         return sendError(
@@ -102,8 +128,12 @@ export const verifyFirebaseToken = async (req, res, next) => {
     // Extract phone number (may not always be present)
     const phoneNumber = decodedToken.phone_number || null;
 
+    console.log("> Extracted UID:", uid);
+    console.log("> Extracted phoneNumber:", phoneNumber);
+
     // Validate that UID exists
     if (!uid) {
+      console.log("> ERROR: UID is missing from decoded token");
       return sendError(res, 401, "Invalid token: User ID not found", {
         error: "MISSING_UID",
       });
@@ -121,16 +151,22 @@ export const verifyFirebaseToken = async (req, res, next) => {
       decodedToken,
     };
 
-    // Log successful authentication in development
-    if (process.env.NODE_ENV === "development") {
-      console.log(`> Firebase auth verified for UID: ${uid}`);
-    }
+    console.log("> req.firebaseUser created:", JSON.stringify({
+      uid: req.firebaseUser.uid,
+      phoneNumber: req.firebaseUser.phoneNumber,
+      email: req.firebaseUser.email
+    }, null, 2));
+    console.log("=== Firebase Token Verification END (SUCCESS) ===\n");
 
     // Proceed to next middleware or route handler
     next();
   } catch (error) {
     // Catch any unexpected errors
-    console.error("Error in Firebase token verification middleware:", error);
+    console.error("\n!!! ERROR in Firebase token verification middleware !!!");
+    console.error("> Error name:", error.name);
+    console.error("> Error message:", error.message);
+    console.error("> Error stack:", error.stack);
+    console.error("=== Firebase Token Verification END (ERROR) ===\n");
 
     return sendError(res, 500, "Internal server error during authentication", {
       error: "INTERNAL_AUTH_ERROR",

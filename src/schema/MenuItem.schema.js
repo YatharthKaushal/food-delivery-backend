@@ -41,7 +41,7 @@ const menuItemSchema = new Schema(
     description: {
       type: String,
       trim: true,
-      minlength: [10, "Description must be at least 10 characters long"],
+      // minlength: [10, "Description must be at least 10 characters long"],
       maxlength: [1000, "Description cannot exceed 1000 characters"],
     },
     media: {
@@ -51,7 +51,7 @@ const menuItemSchema = new Schema(
       type: String,
       required: [true, "Meal type is required"],
       enum: {
-        values: ["LUNCH", "DINNER"],
+        values: ["LUNCH", "DINNER", "OTHER", "BOTH"],
         message: "{VALUE} is not a valid meal type",
       },
       uppercase: true,

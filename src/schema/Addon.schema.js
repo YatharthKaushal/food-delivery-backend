@@ -24,7 +24,7 @@ const addonSchema = new Schema(
     description: {
       type: String,
       trim: true,
-      minlength: [10, "Description must be at least 10 characters long"],
+      // minlength: [10, "Description must be at least 10 characters long"],
       maxlength: [1000, "Description cannot exceed 1000 characters"],
     },
     price: {

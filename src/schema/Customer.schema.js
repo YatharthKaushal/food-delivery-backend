@@ -4,7 +4,7 @@ const customerSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, "Customer name is required"],
+      required: false,
       trim: true,
       minlength: [2, "Name must be at least 2 characters long"],
       maxlength: [100, "Name cannot exceed 100 characters"],
@@ -20,7 +20,7 @@ const customerSchema = new mongoose.Schema(
     phone: {
       type: String,
       trim: true,
-      match: [/^[0-9]{10}$/, "Please provide a valid 10-digit phone number"],
+      // match: [/^[0-9]{10}$/, "Please provide a valid 10-digit phone number"],
     },
     firebaseUid: {
       type: String,
