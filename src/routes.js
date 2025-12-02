@@ -12,7 +12,7 @@ import orderRoutes from "./Order/order.route.js";
 import deliveryRoutes from "./Order/delivery.route.js";
 import driverRoutes from "./Driver/driver.route.js";
 import adminRoutes from "./Admin/admin.route.js";
-import deleteAccountPolicy from "./Service/deleteAccountPolicy.js";
+import deleteAccountPolicy from "./service/deleteAccountPolicy.js";
 
 const router = express.Router();
 
