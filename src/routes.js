@@ -12,7 +12,7 @@ import orderRoutes from "./Order/order.route.js";
 import deliveryRoutes from "./Order/delivery.route.js";
 import driverRoutes from "./Driver/driver.route.js";
 import adminRoutes from "./Admin/admin.route.js";
-import deleteAccountPolicy from "./service/deleteAccountPolicy.js";
+import serviceRoutes from "./service/index.js";
 
 const router = express.Router();
 
@@ -68,7 +68,7 @@ router.use("/admin", adminRoutes);
 
 // Service routes
 // prefix: /api (example, /api/service/delete-account)
-router.use("/service", deleteAccountPolicy);
+router.use("/service", serviceRoutes);
 
 // Add other routes here as needed
 
