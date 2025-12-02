@@ -345,6 +345,89 @@ export const onBoardingUser = async (req, res) => {
 };
 
 /**
+ * Request account deletion for customer
+ * @description Initiates account deletion request. Does not immediately delete the account,
+ *              but schedules it for deletion after a grace period.
+ * @route DELETE /api/auth/customer/delete-account
+ * @access Protected (Firebase Token Required)
+ * @param {import('express').Request} req - Express request object
+ * @param {Object} req.firebaseUser - Firebase user data from middleware
+ * @param {string} req.firebaseUser.uid - Firebase user ID
+ * @param {string} req.firebaseUser.phoneNumber - User's phone number
+ * @param {import('express').Response} res - Express response object
+ * @returns {Object} Success response with deletion scheduled message
+ */
+export const requestAccountDeletion = async (req, res) => {
+  try {
+    // Extract Firebase user data from middleware
+    const { uid, phoneNumber } = req.firebaseUser;
+
+    // Log the deletion request
+    console.log("\n=== Account Deletion Request ===");
+    console.log("> Firebase UID:", uid);
+    console.log("> Phone Number:", phoneNumber);
+    console.log("> Request Time:", new Date().toISOString());
+    console.log("================================\n");
+
+    // Validate that we have user identification
+    if (!uid && !phoneNumber) {
+      return sendError(res, 400, "User identification not found in token", {
+        error: "MISSING_USER_IDENTIFICATION",
+      });
+    }
+
+    // Build query to find customer
+    const query = {
+      isDeleted: false,
+    };
+
+    if (uid) {
+      query.firebaseUid = uid;
+    } else if (phoneNumber) {
+      query.phone = phoneNumber;
+    }
+
+    // Verify customer exists
+    const customer = await Customer.findOne(query);
+
+    if (!customer) {
+      return sendError(res, 404, "Customer profile not found", {
+        error: "CUSTOMER_NOT_FOUND",
+      });
+    }
+
+    // Log customer details for the deletion request
+    console.log("> Account Deletion Requested for:");
+    console.log(">   Customer ID:", customer._id);
+    console.log(">   Name:", customer.name || "N/A");
+    console.log(">   Phone:", customer.phone || "N/A");
+    console.log(">   Email:", customer.email || "N/A");
+
+    return sendSuccess(
+      res,
+      200,
+      "Your account will be deleted in 10 days.",
+      {
+        customerId: customer._id,
+        scheduledDeletionDate: new Date(
+          Date.now() + 10 * 24 * 60 * 60 * 1000
+        ).toISOString(),
+      }
+    );
+  } catch (error) {
+    console.error("Error in requestAccountDeletion:", error);
+    return sendError(
+      res,
+      500,
+      "Failed to process account deletion request",
+      process.env.NODE_ENV === "development"
+        ? { error: error.message }
+        : undefined
+    );
+  }
+};
+
+/**
  * Create a test customer for development/testing purposes
  * @route POST /api/auth/customer/test
  * @access Protected (Admin Only)

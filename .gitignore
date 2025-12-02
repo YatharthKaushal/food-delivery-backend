@@ -11,6 +11,9 @@ tiffin-dabba-serviceAccountKey.json
 .claude
 .claude/
 
+.md
+*.md
+
 # Environment files
 .env
 .env.local

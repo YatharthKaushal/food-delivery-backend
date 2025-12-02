@@ -3,6 +3,7 @@ import {
   getIsProfileComplete,
   onBoardingUser,
   createTestCustomer,
+  requestAccountDeletion,
 } from "./customer.auth.controller.js";
 import { verifyFirebaseToken } from "../middleware/firebaseToken.middleware.js";
 import { authenticate, authorize } from "../middleware/auth.middleware.js";
@@ -29,5 +30,12 @@ router.put("/onboarding", verifyFirebaseToken, onBoardingUser);
  * @access  Protected (Admin Only - JWT Required)
  */
 router.post("/test", authenticate, authorize("ADMIN"), createTestCustomer);
+
+/**
+ * @route   DELETE /api/auth/customer/delete-account
+ * @desc    Request account deletion (schedules deletion after 10 days grace period)
+ * @access  Protected (Firebase Token Required)
+ */
+router.delete("/delete-account", verifyFirebaseToken, requestAccountDeletion);
 
 export default router;
