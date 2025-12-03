@@ -1,4 +1,7 @@
 import Customer from "../schema/Customer.schema.js";
+import Order from "../schema/Order.schema.js";
+import Subscription from "../schema/Subscription.schema.js";
+import Voucher from "../schema/Voucher.schema.js";
 import { sendSuccess, sendError } from "../utils/response.util.js";
 import { firebaseAdmin } from "../config/firebase.config.js";
 
@@ -550,6 +553,244 @@ export const createTestCustomer = async (req, res) => {
       "Failed to create test customer",
       process.env.NODE_ENV === "development"
         ? { error: error.message }
+        : undefined
+    );
+  }
+};
+
+/**
+ * Get comprehensive customer profile data
+ * @description Returns full profile details including orders, addresses, vouchers, and subscriptions
+ * @route GET /api/auth/customer/profile
+ * @access Protected (Firebase Token Required)
+ * @param {import('express').Request} req - Express request object
+ * @param {Object} req.firebaseUser - Firebase user data from middleware
+ * @param {string} req.firebaseUser.uid - Firebase user ID
+ * @param {string} req.firebaseUser.phoneNumber - User's phone number
+ * @param {import('express').Response} res - Express response object
+ * @returns {Object} Comprehensive profile data with orders, vouchers, and subscriptions
+ */
+export const getCustomerProfile = async (req, res) => {
+  try {
+    console.log("\n=== getCustomerProfile START ===");
+
+    // Extract Firebase user data from middleware
+    const { uid, phoneNumber } = req.firebaseUser;
+    console.log("> Firebase UID:", uid);
+    console.log("> Phone Number:", phoneNumber);
+
+    // Validate that we have user identification
+    if (!uid && !phoneNumber) {
+      return sendError(res, 400, "User identification not found in token", {
+        error: "MISSING_USER_IDENTIFICATION",
+      });
+    }
+
+    // Build query to find customer
+    const query = {
+      isDeleted: false,
+    };
+
+    if (uid) {
+      query.firebaseUid = uid;
+    } else if (phoneNumber) {
+      query.phone = phoneNumber;
+    }
+
+    // Fetch customer profile
+    console.log("> Step 1: Fetching customer profile...");
+    const customer = await Customer.findOne(query)
+      .select("-__v")
+      .lean();
+
+    if (!customer) {
+      return sendError(res, 404, "Customer profile not found", {
+        error: "CUSTOMER_NOT_FOUND",
+      });
+    }
+
+    console.log("> Customer ID:", customer._id);
+
+    // Fetch past orders (limited to last 50 orders, sorted by date)
+    console.log("> Step 2: Fetching past orders...");
+    const orders = await Order.find({
+      customerId: customer._id,
+      isDeleted: false,
+    })
+      .select("-__v")
+      .populate("menuItem.menuItemId", "name description price category")
+      .populate("addons.addonId", "name description price")
+      .populate("subscriptionUsed", "planId status")
+      .sort({ scheduledForDate: -1 })
+      .limit(50)
+      .lean();
+
+    console.log("> Orders found:", orders.length);
+
+    // Calculate order statistics
+    const orderStats = {
+      totalOrders: orders.length,
+      completedOrders: orders.filter((order) => order.orderStatus.deliveredAt)
+        .length,
+      cancelledOrders: orders.filter((order) => order.orderStatus.cancelledAt)
+        .length,
+      pendingOrders: orders.filter(
+        (order) =>
+          !order.orderStatus.deliveredAt &&
+          !order.orderStatus.cancelledAt &&
+          !order.orderStatus.failedAt
+      ).length,
+    };
+
+    // Fetch all subscriptions (active and past)
+    console.log("> Step 3: Fetching subscriptions...");
+    const subscriptions = await Subscription.find({
+      customerId: customer._id,
+      isDeleted: false,
+    })
+      .select("-__v")
+      .populate("planId", "planName days planType totalVouchers planPrice description")
+      .sort({ purchaseDate: -1 })
+      .lean();
+
+    console.log("> Subscriptions found:", subscriptions.length);
+
+    // Calculate subscription statistics
+    const subscriptionStats = {
+      totalSubscriptions: subscriptions.length,
+      activeSubscriptions: subscriptions.filter((sub) => sub.status === "ACTIVE")
+        .length,
+      expiredSubscriptions: subscriptions.filter((sub) => sub.status === "EXPIRED")
+        .length,
+      cancelledSubscriptions: subscriptions.filter(
+        (sub) => sub.status === "CANCELLED"
+      ).length,
+    };
+
+    // Fetch vouchers for all subscriptions
+    console.log("> Step 4: Fetching vouchers...");
+    const vouchers = await Voucher.find({
+      customerId: customer._id,
+      isDeleted: false,
+    })
+      .select("-__v")
+      .populate("subscriptionId", "planId status")
+      .sort({ expiryDate: 1 })
+      .lean();
+
+    console.log("> Vouchers found:", vouchers.length);
+
+    // Calculate voucher statistics
+    const voucherStats = {
+      totalVouchers: vouchers.reduce(
+        (sum, voucher) => sum + voucher.totalVouchers,
+        0
+      ),
+      remainingVouchers: vouchers.reduce(
+        (sum, voucher) =>
+          sum + (voucher.isExpired ? 0 : voucher.remainingVouchers),
+        0
+      ),
+      usedVouchers: vouchers.reduce(
+        (sum, voucher) =>
+          sum + (voucher.totalVouchers - voucher.remainingVouchers),
+        0
+      ),
+      expiredVouchers: vouchers.filter((voucher) => voucher.isExpired).length,
+      activeVoucherBatches: vouchers.filter(
+        (voucher) => !voucher.isExpired && voucher.remainingVouchers > 0
+      ).length,
+    };
+
+    // Structure the response data
+    const profileData = {
+      // Basic profile information
+      profile: {
+        customerId: customer._id,
+        name: customer.name || null,
+        email: customer.email || null,
+        phone: customer.phone || null,
+        firebaseUid: customer.firebaseUid,
+        isProfileComplete: customer.isProfileComplete,
+        autoOrder: customer.autoOrder,
+        createdAt: customer.createdAt,
+        updatedAt: customer.updatedAt,
+      },
+
+      // Address information
+      address: customer.address
+        ? {
+            addressLine: customer.address.addressLine || null,
+            dontRingBell: customer.address.dontRingBell || false,
+            dontCall: customer.address.dontCall || false,
+            deliveryNote: customer.address.deliveryNote || "",
+          }
+        : null,
+
+      // Dietary preferences
+      dietaryPreferences: customer.dietaryPreferences
+        ? {
+            foodType: customer.dietaryPreferences.foodType || "VEG",
+            eggiterian: customer.dietaryPreferences.eggiterian || false,
+            jainFriendly: customer.dietaryPreferences.jainFriendly || false,
+            dabbaType: customer.dietaryPreferences.dabbaType || "DISPOSABLE",
+            spiceLevel: customer.dietaryPreferences.spiceLevel || "MEDIUM",
+          }
+        : null,
+
+      // Active subscription status
+      activeSubscription: customer.activeSubscription
+        ? {
+            hasActiveSubscription: customer.activeSubscription.status || false,
+            subscriptionId: customer.activeSubscription.subscriptionId || null,
+          }
+        : {
+            hasActiveSubscription: false,
+            subscriptionId: null,
+          },
+
+      // Order statistics and recent orders
+      orders: {
+        statistics: orderStats,
+        recentOrders: orders.slice(0, 10), // Return last 10 orders in detail
+        allOrdersCount: orders.length,
+      },
+
+      // Subscription information
+      subscriptions: {
+        statistics: subscriptionStats,
+        allSubscriptions: subscriptions,
+      },
+
+      // Voucher information
+      vouchers: {
+        statistics: voucherStats,
+        allVouchers: vouchers,
+      },
+    };
+
+    console.log("> Step 5: Profile data compiled successfully");
+    console.log("=== getCustomerProfile END (SUCCESS) ===\n");
+
+    return sendSuccess(
+      res,
+      200,
+      "Customer profile retrieved successfully",
+      profileData
+    );
+  } catch (error) {
+    console.error("\n!!! ERROR in getCustomerProfile !!!");
+    console.error("> Error name:", error.name);
+    console.error("> Error message:", error.message);
+    console.error("> Error stack:", error.stack);
+    console.error("=== getCustomerProfile END (ERROR) ===\n");
+
+    return sendError(
+      res,
+      500,
+      "Failed to retrieve customer profile",
+      process.env.NODE_ENV === "development"
+        ? { error: error.message, stack: error.stack }
         : undefined
     );
   }

@@ -4,6 +4,7 @@ import {
   onBoardingUser,
   createTestCustomer,
   requestAccountDeletion,
+  getCustomerProfile,
 } from "./customer.auth.controller.js";
 import { verifyFirebaseToken } from "../middleware/firebaseToken.middleware.js";
 import { authenticate, authorize } from "../middleware/auth.middleware.js";
@@ -37,5 +38,12 @@ router.post("/test", authenticate, authorize("ADMIN"), createTestCustomer);
  * @access  Protected (Firebase Token Required)
  */
 router.delete("/delete-account", verifyFirebaseToken, requestAccountDeletion);
+
+/**
+ * @route   GET /api/auth/customer/profile
+ * @desc    Get comprehensive customer profile with orders, subscriptions, and vouchers
+ * @access  Protected (Firebase Token Required)
+ */
+router.get("/profile", verifyFirebaseToken, getCustomerProfile);
 
 export default router;
