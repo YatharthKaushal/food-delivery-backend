@@ -13,15 +13,13 @@ const adminSchema = new Schema(
   {
     name: {
       type: String,
-      required: [true, "Name is required"],
       trim: true,
       minlength: [2, "Name must be at least 2 characters long"],
       maxlength: [100, "Name cannot exceed 100 characters"],
     },
     username: {
       type: String,
-      required: [true, "Username is required"],
-      unique: true,
+      sparse: true,
       trim: true,
       lowercase: true,
       minlength: [3, "Username must be at least 3 characters long"],
@@ -38,7 +36,6 @@ const adminSchema = new Schema(
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
       minlength: [8, "Password must be at least 8 characters long"],
       select: false, // Don't include password by default in queries
     },
@@ -83,10 +80,10 @@ const adminSchema = new Schema(
 );
 
 // Indexes for better query performance
-adminSchema.index({ username: 1, isDeleted: 1 });
-adminSchema.index({ email: 1, isDeleted: 1 });
-adminSchema.index({ role: 1, isDeleted: 1 });
-adminSchema.index({ createdAt: -1 });
+// adminSchema.index({ username: 1, isDeleted: 1 });
+// adminSchema.index({ email: 1, isDeleted: 1 });
+// adminSchema.index({ role: 1, isDeleted: 1 });
+// adminSchema.index({ createdAt: -1 });
 
 // Export the model
 const Admin = mongoose.model("Admin", adminSchema);
