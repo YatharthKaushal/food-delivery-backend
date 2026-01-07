@@ -17,16 +17,35 @@ import mongoose from "mongoose";
  */
 export const createMenuItem = async (req, res) => {
   try {
-    const { name, content, description, media, mealType, price, compareAtPrice, isLive } = req.body;
+    const {
+      name,
+      content,
+      description,
+      media,
+      mealType,
+      price,
+      compareAtPrice,
+      isLive,
+    } = req.body;
 
     // Validate required fields
     if (!name || !content || !mealType || price === undefined) {
-      return sendError(res, 400, "Missing required fields: name, content, mealType, and price are required");
+      return sendError(
+        res,
+        400,
+        "Missing required fields: name, content, mealType, and price are required"
+      );
     }
 
     // Validate mealType enum
-    if (!["LUNCH", "DINNER", "OTHER", "BOTH"].includes(mealType.toUpperCase())) {
-      return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
+    if (
+      !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(mealType.toUpperCase())
+    ) {
+      return sendError(
+        res,
+        400,
+        "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH"
+      );
     }
 
     // Validate price
@@ -37,10 +56,18 @@ export const createMenuItem = async (req, res) => {
     // Validate compareAtPrice if provided
     if (compareAtPrice !== undefined && compareAtPrice !== null) {
       if (typeof compareAtPrice !== "number" || compareAtPrice < 0) {
-        return sendError(res, 400, "Compare at price must be a non-negative number");
+        return sendError(
+          res,
+          400,
+          "Compare at price must be a non-negative number"
+        );
       }
       if (compareAtPrice <= price) {
-        return sendError(res, 400, "Compare at price must be greater than price");
+        return sendError(
+          res,
+          400,
+          "Compare at price must be greater than price"
+        );
       }
     }
 
@@ -117,7 +144,11 @@ export const getAllMenuItems = async (req, res) => {
     if (mealType) {
       const upperMealType = mealType.toUpperCase();
       if (!["LUNCH", "DINNER", "OTHER", "BOTH"].includes(upperMealType)) {
-        return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
+        return sendError(
+          res,
+          400,
+          "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH"
+        );
       }
       filter.mealType = upperMealType;
     }
@@ -133,14 +164,22 @@ export const getAllMenuItems = async (req, res) => {
       if (minPrice !== undefined) {
         const min = parseFloat(minPrice);
         if (isNaN(min) || min < 0) {
-          return sendError(res, 400, "Invalid minPrice. Must be a non-negative number");
+          return sendError(
+            res,
+            400,
+            "Invalid minPrice. Must be a non-negative number"
+          );
         }
         filter.price.$gte = min;
       }
       if (maxPrice !== undefined) {
         const max = parseFloat(maxPrice);
         if (isNaN(max) || max < 0) {
-          return sendError(res, 400, "Invalid maxPrice. Must be a non-negative number");
+          return sendError(
+            res,
+            400,
+            "Invalid maxPrice. Must be a non-negative number"
+          );
         }
         filter.price.$lte = max;
       }
@@ -166,7 +205,13 @@ export const getAllMenuItems = async (req, res) => {
 
     // Sort
     const sortOptions = {};
-    const validSortFields = ["name", "price", "mealType", "createdAt", "updatedAt"];
+    const validSortFields = [
+      "name",
+      "price",
+      "mealType",
+      "createdAt",
+      "updatedAt",
+    ];
     if (validSortFields.includes(sortBy)) {
       sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
     } else {
@@ -195,7 +240,11 @@ export const getAllMenuItems = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching menu items:", error);
-    return sendError(res, 500, "Failed to retrieve menu items. Please try again");
+    return sendError(
+      res,
+      500,
+      "Failed to retrieve menu items. Please try again"
+    );
   }
 };
 
@@ -230,7 +279,11 @@ export const getMenuItemById = async (req, res) => {
     return sendSuccess(res, 200, "Menu item retrieved successfully", menuItem);
   } catch (error) {
     console.error("Error fetching menu item:", error);
-    return sendError(res, 500, "Failed to retrieve menu item. Please try again");
+    return sendError(
+      res,
+      500,
+      "Failed to retrieve menu item. Please try again"
+    );
   }
 };
 
@@ -245,7 +298,9 @@ export const getMenuItemById = async (req, res) => {
 export const updateMenuItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+
+    // Clone body so we can safely mutate
+    const updates = { ...req.body };
 
     // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -253,61 +308,144 @@ export const updateMenuItem = async (req, res) => {
     }
 
     // Check if menu item exists and is not deleted
-    const existingMenuItem = await MenuItem.findOne({ _id: id, isDeleted: false });
-
+    const existingMenuItem = await MenuItem.findOne({
+      _id: id,
+      isDeleted: false,
+    });
     if (!existingMenuItem) {
       return sendError(res, 404, "Menu item not found or has been deleted");
     }
 
-    // Validate updates
-    if (updates.mealType && !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(updates.mealType.toUpperCase())) {
-      return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
+    // -------------------------
+    // 1) NORMALIZE INPUT FIRST
+    // -------------------------
+
+    // Trim string fields
+    if (typeof updates.name === "string") updates.name = updates.name.trim();
+    if (typeof updates.content === "string")
+      updates.content = updates.content.trim();
+    if (typeof updates.description === "string")
+      updates.description = updates.description.trim();
+
+    // Normalize mealType
+    if (typeof updates.mealType === "string") {
+      updates.mealType = updates.mealType.trim().toUpperCase();
+    }
+
+    // Coerce numeric fields (handles JSON and multipart/form-data)
+    if (updates.price !== undefined) updates.price = Number(updates.price);
+
+    // Allow compareAtPrice to be null to clear it
+    if (updates.compareAtPrice !== undefined) {
+      updates.compareAtPrice =
+        updates.compareAtPrice === null ||
+        updates.compareAtPrice === "null" ||
+        updates.compareAtPrice === ""
+          ? null
+          : Number(updates.compareAtPrice);
+    }
+
+    // Coerce boolean fields if they come as strings ("true"/"false")
+    if (updates.isLive !== undefined) {
+      if (typeof updates.isLive === "string")
+        updates.isLive = updates.isLive === "true";
+      updates.isLive = Boolean(updates.isLive);
+    }
+
+    // -------------------------
+    // 2) VALIDATE
+    // -------------------------
+
+    if (
+      updates.mealType &&
+      !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(updates.mealType)
+    ) {
+      return sendError(
+        res,
+        400,
+        "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH"
+      );
     }
 
     if (updates.price !== undefined) {
-      if (typeof updates.price !== "number" || updates.price < 0) {
+      if (!Number.isFinite(updates.price) || updates.price < 0) {
         return sendError(res, 400, "Price must be a non-negative number");
       }
     }
 
-    if (updates.compareAtPrice !== undefined && updates.compareAtPrice !== null) {
-      const priceToCompare = updates.price !== undefined ? updates.price : existingMenuItem.price;
-      if (typeof updates.compareAtPrice !== "number" || updates.compareAtPrice < 0) {
-        return sendError(res, 400, "Compare at price must be a non-negative number");
-      }
-      if (updates.compareAtPrice <= priceToCompare) {
-        return sendError(res, 400, "Compare at price must be greater than price");
+    if (updates.compareAtPrice !== undefined) {
+      if (updates.compareAtPrice !== null) {
+        if (
+          !Number.isFinite(updates.compareAtPrice) ||
+          updates.compareAtPrice < 0
+        ) {
+          return sendError(
+            res,
+            400,
+            "Compare at price must be a non-negative number"
+          );
+        }
+
+        // Compare against the final effective price (incoming price if provided, else existing)
+        const effectivePrice =
+          updates.price !== undefined ? updates.price : existingMenuItem.price;
+
+        if (!Number.isFinite(effectivePrice)) {
+          return sendError(
+            res,
+            400,
+            "Existing price is invalid; cannot validate compareAtPrice"
+          );
+        }
+
+        if (updates.compareAtPrice <= effectivePrice) {
+          return sendError(
+            res,
+            400,
+            "Compare at price must be greater than price"
+          );
+        }
       }
     }
 
-    // Prevent direct modification of certain fields
+    // -------------------------
+    // 3) BLOCK IMMUTABLE FIELDS
+    // -------------------------
     delete updates._id;
     delete updates.__v;
     delete updates.createdAt;
     delete updates.isDeleted;
     delete updates.deletedAt;
 
-    // Trim string fields
-    if (updates.name) updates.name = updates.name.trim();
-    if (updates.content) updates.content = updates.content.trim();
-    if (updates.description) updates.description = updates.description.trim();
-    if (updates.mealType) updates.mealType = updates.mealType.toUpperCase();
-
-    // Update menu item
+    // -------------------------
+    // 4) UPDATE
+    // -------------------------
     const updatedMenuItem = await MenuItem.findByIdAndUpdate(
       id,
       { $set: updates },
-      {
-        new: true, // Return updated document
-        runValidators: true, // Run schema validators
-      }
+      { new: true, runValidators: true }
     );
 
-    return sendSuccess(res, 200, "Menu item updated successfully", updatedMenuItem);
+    // Log the response to check
+    console.log({
+      existingPrice: existingMenuItem.price,
+      incomingPrice: updates.price,
+      incomingCompareAt: updates.compareAtPrice,
+      types: {
+        price: typeof updates.price,
+        compareAtPrice: typeof updates.compareAtPrice,
+      },
+    });
+
+    return sendSuccess(
+      res,
+      200,
+      "Menu item updated successfully",
+      updatedMenuItem
+    );
   } catch (error) {
     console.error("Error updating menu item:", error);
 
-    // Handle validation errors
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((err) => err.message);
       return sendError(res, 400, "Validation error", { errors: messages });
@@ -316,6 +454,81 @@ export const updateMenuItem = async (req, res) => {
     return sendError(res, 500, "Failed to update menu item. Please try again");
   }
 };
+
+// export const updateMenuItem = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const updates = req.body;
+
+//     // Validate MongoDB ObjectId
+//     if (!mongoose.Types.ObjectId.isValid(id)) {
+//       return sendError(res, 400, "Invalid menu item ID format");
+//     }
+
+//     // Check if menu item exists and is not deleted
+//     const existingMenuItem = await MenuItem.findOne({ _id: id, isDeleted: false });
+
+//     if (!existingMenuItem) {
+//       return sendError(res, 404, "Menu item not found or has been deleted");
+//     }
+
+//     // Validate updates
+//     if (updates.mealType && !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(updates.mealType.toUpperCase())) {
+//       return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
+//     }
+
+//     if (updates.price !== undefined) {
+//       if (typeof updates.price !== "number" || updates.price < 0) {
+//         return sendError(res, 400, "Price must be a non-negative number");
+//       }
+//     }
+
+//     if (updates.compareAtPrice !== undefined && updates.compareAtPrice !== null) {
+//       const priceToCompare = updates.price !== undefined ? updates.price : existingMenuItem.price;
+//       if (typeof updates.compareAtPrice !== "number" || updates.compareAtPrice < 0) {
+//         return sendError(res, 400, "Compare at price must be a non-negative number");
+//       }
+//       if (updates.compareAtPrice <= priceToCompare) {
+//         return sendError(res, 400, "Compare at price must be greater than price");
+//       }
+//     }
+
+//     // Prevent direct modification of certain fields
+//     delete updates._id;
+//     delete updates.__v;
+//     delete updates.createdAt;
+//     delete updates.isDeleted;
+//     delete updates.deletedAt;
+
+//     // Trim string fields
+//     if (updates.name) updates.name = updates.name.trim();
+//     if (updates.content) updates.content = updates.content.trim();
+//     if (updates.description) updates.description = updates.description.trim();
+//     if (updates.mealType) updates.mealType = updates.mealType.toUpperCase();
+
+//     // Update menu item
+//     const updatedMenuItem = await MenuItem.findByIdAndUpdate(
+//       id,
+//       { $set: updates },
+//       {
+//         new: true, // Return updated document
+//         runValidators: true, // Run schema validators
+//       }
+//     );
+
+//     return sendSuccess(res, 200, "Menu item updated successfully", updatedMenuItem);
+//   } catch (error) {
+//     console.error("Error updating menu item:", error);
+
+//     // Handle validation errors
+//     if (error.name === "ValidationError") {
+//       const messages = Object.values(error.errors).map((err) => err.message);
+//       return sendError(res, 400, "Validation error", { errors: messages });
+//     }
+
+//     return sendError(res, 500, "Failed to update menu item. Please try again");
+//   }
+// };
 
 /**
  * Soft delete a menu item
@@ -425,7 +638,11 @@ export const permanentlyDeleteMenuItem = async (req, res) => {
     });
   } catch (error) {
     console.error("Error permanently deleting menu item:", error);
-    return sendError(res, 500, "Failed to permanently delete menu item. Please try again");
+    return sendError(
+      res,
+      500,
+      "Failed to permanently delete menu item. Please try again"
+    );
   }
 };
 
@@ -456,10 +673,19 @@ export const toggleMenuItemLiveStatus = async (req, res) => {
     menuItem.isLive = !menuItem.isLive;
     await menuItem.save();
 
-    return sendSuccess(res, 200, `Menu item ${menuItem.isLive ? "activated" : "deactivated"} successfully`, menuItem);
+    return sendSuccess(
+      res,
+      200,
+      `Menu item ${menuItem.isLive ? "activated" : "deactivated"} successfully`,
+      menuItem
+    );
   } catch (error) {
     console.error("Error toggling menu item live status:", error);
-    return sendError(res, 500, "Failed to update menu item status. Please try again");
+    return sendError(
+      res,
+      500,
+      "Failed to update menu item status. Please try again"
+    );
   }
 };
 
@@ -498,11 +724,23 @@ export const bulkUpdateMenuItems = async (req, res) => {
     delete updates.deletedAt;
 
     // Validate updates
-    if (updates.mealType && !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(updates.mealType.toUpperCase())) {
-      return sendError(res, 400, "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH");
+    if (
+      updates.mealType &&
+      !["LUNCH", "DINNER", "OTHER", "BOTH"].includes(
+        updates.mealType.toUpperCase()
+      )
+    ) {
+      return sendError(
+        res,
+        400,
+        "Invalid mealType. Must be LUNCH, DINNER, OTHER, or BOTH"
+      );
     }
 
-    if (updates.price !== undefined && (typeof updates.price !== "number" || updates.price < 0)) {
+    if (
+      updates.price !== undefined &&
+      (typeof updates.price !== "number" || updates.price < 0)
+    ) {
       return sendError(res, 400, "Price must be a non-negative number");
     }
 
@@ -526,7 +764,11 @@ export const bulkUpdateMenuItems = async (req, res) => {
       return sendError(res, 400, "Validation error", { errors: messages });
     }
 
-    return sendError(res, 500, "Failed to bulk update menu items. Please try again");
+    return sendError(
+      res,
+      500,
+      "Failed to bulk update menu items. Please try again"
+    );
   }
 };
 
@@ -542,11 +784,20 @@ export const getMenuItemStats = async (req, res) => {
       {
         $facet: {
           totalCount: [{ $count: "count" }],
-          liveCount: [{ $match: { isLive: true, isDeleted: false } }, { $count: "count" }],
+          liveCount: [
+            { $match: { isLive: true, isDeleted: false } },
+            { $count: "count" },
+          ],
           deletedCount: [{ $match: { isDeleted: true } }, { $count: "count" }],
           byMealType: [
             { $match: { isDeleted: false } },
-            { $group: { _id: "$mealType", count: { $sum: 1 }, avgPrice: { $avg: "$price" } } },
+            {
+              $group: {
+                _id: "$mealType",
+                count: { $sum: 1 },
+                avgPrice: { $avg: "$price" },
+              },
+            },
           ],
           priceStats: [
             { $match: { isDeleted: false } },
@@ -568,12 +819,25 @@ export const getMenuItemStats = async (req, res) => {
       live: stats[0].liveCount[0]?.count || 0,
       deleted: stats[0].deletedCount[0]?.count || 0,
       byMealType: stats[0].byMealType,
-      priceStats: stats[0].priceStats[0] || { minPrice: 0, maxPrice: 0, avgPrice: 0 },
+      priceStats: stats[0].priceStats[0] || {
+        minPrice: 0,
+        maxPrice: 0,
+        avgPrice: 0,
+      },
     };
 
-    return sendSuccess(res, 200, "Menu item statistics retrieved successfully", result);
+    return sendSuccess(
+      res,
+      200,
+      "Menu item statistics retrieved successfully",
+      result
+    );
   } catch (error) {
     console.error("Error fetching menu item stats:", error);
-    return sendError(res, 500, "Failed to retrieve statistics. Please try again");
+    return sendError(
+      res,
+      500,
+      "Failed to retrieve statistics. Please try again"
+    );
   }
 };
